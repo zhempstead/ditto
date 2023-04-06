@@ -1,4 +1,6 @@
 import os
+import subprocess
+import sys
 import time
 
 datasets = """Dirty/DBLP-ACM
@@ -49,16 +51,19 @@ lms = ['roberta', 'roberta', 'roberta', 'roberta', 'roberta', 'roberta',
 # xlnet
 # roberta""".split('\n')
 
+
 for dataset, op, lm in zip(datasets, ops, lms):
+    if dataset != "Textual/Company":
+        continue
     if dataset in special_datasets:
         batch_size, epochs = special_datasets[dataset]
     else:
         batch_size, epochs = 32, 15
 
-    for da in [True, False]:
-        for dk in [True, False]:
+    for da in [True]:
+        for dk in [True]:
             for run_id in range(5):
-                cmd = """CUDA_VISIBLE_DEVICES=3 python train_ditto.py \
+                cmd = """CUDA_VISIBLE_DEVICES=0 python train_ditto.py \
               --task %s \
               --logdir results_ditto/ \
               --finetuning \
@@ -75,4 +80,15 @@ for dataset, op, lm in zip(datasets, ops, lms):
                 if dk:
                     cmd += ' --dk general'
                 print(cmd)
-                os.system(cmd)
+                #cmd = f"echo {dataset}"
+                s = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE)
+                while s.poll() is None:
+                    l = s.stdout.readline() # This blocks until it receives a newline.
+                    print(l.decode('ascii'))
+                    # When the subprocess terminates there might be unconsumed output 
+                    # that still needs to be processed.
+                print(s.stdout.read().decode('ascii'))
+                print(s.poll())
+                if s.poll() != 0:
+                    raise ValueError("Failed")
+
