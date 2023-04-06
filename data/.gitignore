@@ -1,0 +1,4 @@
+*.dk
+*.su
+*.csv
+ditto_light/__pycache__
