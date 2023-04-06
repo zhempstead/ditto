@@ -64,7 +64,7 @@ class DittoModel(nn.Module):
         return self.fc(enc) # .squeeze() # .sigmoid()
 
 
-def evaluate(model, iterator, threshold=None):
+def evaluate(model, iterator, threshold=None, return_preds=False):
     """Evaluate a model on a validation/test dataset
 
     Args:
@@ -91,7 +91,10 @@ def evaluate(model, iterator, threshold=None):
     if threshold is not None:
         pred = [1 if p > threshold else 0 for p in all_probs]
         f1 = metrics.f1_score(all_y, pred)
-        return f1
+        if return_preds:
+            return f1, all_y, pred
+        else:
+            return f1
     else:
         best_th = 0.5
         f1 = 0.0 # metrics.f1_score(all_y, all_p)
@@ -196,6 +199,7 @@ def train(trainset, validset, testset, run_tag, hp):
     writer = SummaryWriter(log_dir=hp.logdir)
 
     best_dev_f1 = best_test_f1 = 0.0
+    best_preds = []
     for epoch in range(1, hp.n_epochs+1):
         # train
         model.train()
@@ -204,11 +208,12 @@ def train(trainset, validset, testset, run_tag, hp):
         # eval
         model.eval()
         dev_f1, th = evaluate(model, valid_iter)
-        test_f1 = evaluate(model, test_iter, threshold=th)
+        test_f1, ys, preds = evaluate(model, test_iter, threshold=th, return_preds=True)
 
         if dev_f1 > best_dev_f1:
             best_dev_f1 = dev_f1
             best_test_f1 = test_f1
+            best_preds = preds
             if hp.save_model:
                 # create the directory if not exist
                 directory = os.path.join(hp.logdir, hp.task)
@@ -231,3 +236,5 @@ def train(trainset, validset, testset, run_tag, hp):
         writer.add_scalars(run_tag, scalars, epoch)
 
     writer.close()
+
+    return best_test_f1, ys, best_preds

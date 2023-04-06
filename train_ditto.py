@@ -4,7 +4,10 @@ import json
 import sys
 import torch
 import numpy as np
+from pathlib import Path
 import random
+
+import pandas as pd
 
 sys.path.insert(0, "Snippext_public")
 
@@ -86,7 +89,14 @@ if __name__=="__main__":
     test_dataset = DittoDataset(testset, lm=hp.lm)
 
     # train and evaluate the model
-    train(train_dataset,
+    f1, ys, preds = train(train_dataset,
           valid_dataset,
           test_dataset,
           run_tag, hp)
+
+    datadir = Path(testset).parent
+    test_csv = datadir / 'test.csv'
+    df = pd.read_csv(test_csv)
+    assert all([bool(y) for y in ys] == df['match'])
+    df['ditto_pred'] = [bool(pred) for pred in preds]
+    df.to_csv(datadir / 'test_pred.csv', index=False)
