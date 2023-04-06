@@ -16,7 +16,8 @@ from tensorboardX import SummaryWriter
 from apex import amp
 
 lm_mp = {'roberta': 'roberta-base',
-         'distilbert': 'distilbert-base-uncased'}
+         'distilbert': 'distilbert-base-uncased',
+         'bert': 'bert-base-uncased'}
 
 class DittoModel(nn.Module):
     """A baseline model for EM."""
