@@ -13,3 +13,4 @@ nltk==3.5
 pandas
 openai
 tenacity
+python-dotenv
