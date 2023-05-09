@@ -12,9 +12,24 @@ class IntegrationPrompt:
         self.question = question
         self.lang = 'english'
     
-    def get_prompt(self, candidate1, candidate2):
-        full_st = self.preamble + ' ' + self.c1sentence + candidate1 + ' ' + self.c2sentence + ' ' + candidate2 + ' ' + self.question
+    def get_prompt(self, candidate1, candidate2, include_preamble=True):
+        full_st = self.c1sentence + candidate1 + ' ' + self.c2sentence + ' ' + candidate2 + ' ' + self.question
+        if include_preamble:
+            full_st = self.preamble + ' ' + full_st
         return full_st
+
+    def get_chat(self, candidate1, candidate2, examples, followup):
+        chat = []
+        include_preamble = True
+        for idx, example in examples:
+            message = self.get_prompt(example[0], example[1], include_preamble=include_preamble) + ' ' + followup
+            chat.append({"role": "user", "content": message})
+            include_preamble = False
+            chat.append({"role": "assistant", "content": example[2]})
+        message = self.get_prompt(candidate1, candidate2, include_preamble=include_preamble) + ' ' + followup
+        chat.append({"role": "user", "content": message})
+        return chat
+
     
     def get_prompt_nospaces(self, candidate1, candidate2):
         full_st = self.preamble + self.c1sentence + candidate1 + self.c2sentence + candidate2 + self.question
@@ -106,6 +121,14 @@ def generate_journalist(er_row1, er_row2):
     jprompt = IntegrationPrompt(preamble, c1sentence, c2sentence, question)
     return jprompt.get_prompt(er_row1, er_row2)
 
+def generate_baselinetemp():
+    preamble = 'We are trying to integrate product data from two different databases. The goal is to look at two product entries, one from each database, and determine whether the two entries refer to the same product or not. Since the databases are different, there will still be some differences between entries that refer to the same product.'
+    c1sentence = 'Here is an entry from the first database:'
+    c2sentence = 'Here is an entry from the second database:'
+    question = 'As best as you can tell, do these entries refer to the same product?'
+    baselineprompt = IntegrationPrompt(preamble, c1sentence, c2sentence, question)
+    return baselineprompt
+
 def generate_plaintemp():
     preamble = 'Consider the following pair of csv file rows:'
     c1sentence = ''
@@ -129,9 +152,20 @@ def generate_veryplain(er_row1, er_row2):
     question = 'Same product?'
     veryplainprompt = IntegrationPrompt(preamble, c1sentence, c2sentence, question)
     return veryplainprompt.get_prompt(er_row1, er_row2)
-    
+
+TEMPLATES = {
+    'detective': generate_detectivetemp(),
+    'customer': generate_customertemp(),
+    'layperson': generate_laypersontemp(),
+    'security': generate_securitytemp(),
+    'journalist': generate_journalisttemp(),
+    'baseline': generate_baselinetemp(),
+    'plain': generate_plaintemp(),
+    'veryplain': generate_veryplaintemp(),
+}
 
 if __name__=='__main__':
+    '''
     df = pd.read_csv('../ditto_erdata/Amazon-Google.csv')
     leftrow = df.loc[0]['left']
     rightrow = df.loc[0]['right']
@@ -139,6 +173,7 @@ if __name__=='__main__':
     leftrow = ' "' + leftrow + '".'
     rightrow = rightrow.replace('\n', '\t')
     rightrow = ' "' + rightrow + '".'
+    '''
     
     # print(generate_detectiveprompt(leftrow, rightrow))
     # print(generate_layperson(leftrow, rightrow))
@@ -151,10 +186,11 @@ if __name__=='__main__':
     cust_temp = generate_customertemp()
     sec_temp = generate_securitytemp()
     j_temp = generate_journalisttemp()
+    baseline_temp = generate_baselinetemp()
     plain_temp = generate_plaintemp()
     veryplain_temp = generate_veryplaintemp()
-    all_temps = [det_temp, cust_temp, lay_temp, sec_temp, j_temp]
-    temp_names = ['detective', 'customer', 'layperson', 'security', 'journalist']
+    all_temps = [det_temp, cust_temp, lay_temp, sec_temp, j_temp, baseline_temp, plain_temp, veryplain_temp]
+    temp_names = ['detective', 'customer', 'layperson', 'security', 'journalist', 'baseline', 'plain', 'veryplain']
     for i,tmp in enumerate(all_temps):
         fname = 'all_prompts/' + temp_names[i] + 'prompt_english.pkl'
         with open(fname, 'wb') as fh:

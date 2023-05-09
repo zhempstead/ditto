@@ -2,7 +2,10 @@ import pandas as pd
 import pickle
 import openai
 import signal
+import argparse
+from dotenv import load_dotenv
 import os
+from pathlib import Path
 from crowdkit.aggregation import MajorityVote, Wawa, DawidSkene
 from googletrans import Translator
 from tenacity import (
@@ -11,6 +14,11 @@ from tenacity import (
     wait_random_exponential,
     retry_if_exception_type
 )  # for exponential backoff
+from prompt_generator import TEMPLATES
+
+
+STORIES = ['baseline', 'plain', 'veryplain', 'customer', 'journalist', 'security', 'layperson', 'detective']
+DATASETS = ['cameras', 'computers', 'shoes', 'watches', 'Amazon-Google']
 
 '''
 Purpose: Run multiple prompts with multiple temperatures,
@@ -84,12 +92,8 @@ def response_suffwtemp(prompt_tmp, row1, row2, temp_val, timeout=30):
     if prompt_tmp.lang != 'english':
         translator = Translator()
         followup = translator.translate(followup, src='english', dest=fullprompt.lang).text
-    
-    fullprompt = fullprompt + ' ' + followup
-    
     chat = [{"role": "system", "content": "You are a helpful assistant who can only answer YES or NO and then explain your reasoning."}]
-    fullmsg = {"role": "user", "content": fullprompt }
-    chat.append(fullmsg)
+    chat += prompt_tmp.get_chat(row1, row2, [], followup)
     print("Sending: {}".format(chat))
     signal.signal(signal.SIGALRM, handler)
     signal.alarm(timeout)
@@ -306,11 +310,13 @@ def storysuff(match_file, story_name, samp_range : list, samp_type, rows, match_
 
     '''
     
-    story_fname = 'all_prompts/' + story_name + 'prompt_english.pkl'
-    with open(story_fname, 'rb') as fh:
-        story_tmp = pickle.load(fh)
+    #story_fname = 'all_prompts/' + story_name + 'prompt_english.pkl'
+    #with open(story_fname, 'rb') as fh:
+    #    story_tmp = pickle.load(fh)
+    story_tmp = TEMPLATES[story_name]
     
     df = pd.read_csv(match_file)
+    outdir = Path('matchwsuff')
     
     for r_ind in rows:
         dfrow = df.loc[r_ind]
@@ -318,7 +324,10 @@ def storysuff(match_file, story_name, samp_range : list, samp_type, rows, match_
         match = get_candidate(dfrow)
         for i in range(num_reps):
             for sval in samp_range:
-                outname = 'matchwsuff' + match_prefix + story_name + '-' + str(r_ind) + '-' + 'rep' + str(i) + '-' + samp_type + str(sval).replace('.', '_') + '.csv'
+                outname = outdir / ('-'.join([match_prefix, story_name, str(r_ind), f'rep{i}', f'{samp_type}{str(sval).replace(".", "_")}', '0shot']) + '.csv')
+                if outname.exists():
+                    print(f"{outname} exists...")
+                    continue
                 if samp_type == 'temperature':
                     story_response = response_suffwtemp(story_tmp, match[0], match[1], sval)
                 else:
@@ -951,40 +960,53 @@ if __name__=='__main__':
     # rep_row = [23, 25, 46, 0, 29, 31]
     # rep_row = [2, 12, 30, 0, 1, 3, 46, 201, 302, 44, 136, 207]
     # ditto_dct = {2 : True, 12 : True, 30 : True, 0 : False, 1 : False, 3 : False, 46 : True, 201 : True, 302 : True, 44 : False, 136 : False, 207 : False}
-    maindf = pd.read_csv('../ditto_erdata/shoes.csv')
-    match_prefix = 'shoes'
-    match_outfolder = 'shoesresults'
-    ditto_dct = maindf['match'].to_dict()
-    rep_row = ditto_dct.keys()
-    
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--stories", nargs='+', default=STORIES, choices=STORIES)
+    parser.add_argument("--datasets", nargs='+', default=DATASETS, choices=DATASETS)
+    parser.add_argument("--reps", type=int, default=10)
+    parser.add_argument("--temps", type=float, nargs='+', default=[2.0])
+    parser.add_argument("--key", type=int, required=True)
+    args = parser.parse_args()
+
+    load_dotenv()
+    openai.api_key = os.getenv(f"OPENAI_API_KEY{args.key}")
     # plain_vs_storysuff('../ditto_erdata/Amazon-Google.csv', 'detective', [0.0, 1.0, 2.0], 'temperature', rep_row)
-    stories = ['veryplain', 'customer', 'journalist', 'security', 'layperson', 'detective']
-    for s in stories:
-        storysuff('../ditto_erdata/shoes.csv', s, [0.0, 1.0, 2.0], 'temperature', rep_row, match_prefix)
+    for num_reps in range(1, args.reps + 1):
+        print(f"Rep {num_reps}:")
+        for d in args.datasets:
+            print(f"Dataset {d}:")
+            maindf = pd.read_csv(f'er_results/{d}.csv')
+            match_prefix = d
+            match_outfolder = f'{d}results'
+            ditto_dct = maindf['match'].to_dict()
+            rep_row = ditto_dct.keys()
+            for s in args.stories:
+                print(f"Story {s}")
+                storysuff(f'er_results/{d}.csv', s, args.temps, 'temperature', rep_row, match_prefix, num_reps=num_reps)
     # plain_vs_lang('chinese (traditional)', [0.0, 0.5, 0.9, 1.4], 'temperature', rep_row)
     # combine_results('detective', 'storytemp_sepclear')
     # for i in range(10):
     #     test_tempwresp(timeout=60)
     # count_garbage()
     # combine_storyresults('detective', 'nogarb')
-    results_folder('../ditto_erdata/shoes.csv', match_outfolder, match_prefix)
-    combine_storiesresults('../ditto_erdata/shoes.csv', match_outfolder)
+    #results_folder('../ditto_erdata/shoes.csv', match_outfolder, match_prefix)
+    #combine_storiesresults('../ditto_erdata/shoes.csv', match_outfolder)
     # analyze_singlerep('nogarb_full.csv', 2.0, 0)
-    fullresult_file = match_outfolder + '_full.csv'
-    crowd_gather(fullresult_file, 0.0, ditto_dct)
-    crowd_gather(fullresult_file, 1.0, ditto_dct)
-    crowd_gather(fullresult_file, 2.0, ditto_dct)
+    #fullresult_file = match_outfolder + '_full.csv'
+    #crowd_gather(fullresult_file, 0.0, ditto_dct)
+    #crowd_gather(fullresult_file, 1.0, ditto_dct)
+    #crowd_gather(fullresult_file, 2.0, ditto_dct)
     # crowd_analysis('shoesresults_full.csv', 2.0, ditto_dct)
-    perprompt_majorities(fullresult_file, 0.0)
-    perprompt_majorities(fullresult_file, 1.0)
-    perprompt_majorities(fullresult_file, 2.0)
+    #perprompt_majorities(fullresult_file, 0.0)
+    #perprompt_majorities(fullresult_file, 1.0)
+    #perprompt_majorities(fullresult_file, 2.0)
     # get_stats('DawidSkene_results-temperature2_0.csv')
     # get_stats('MajorityVote_results-temperature2_0.csv')
     # get_stats('Wawa_results-temperature2_0.csv')
     
-    method_names = ['MajorityVote', 'Wawa', 'DawidSkene']
-    temps = [0.0, 1.0, 2.0]
-    get_stats(method_names, temps, stories)
+    #method_names = ['MajorityVote', 'Wawa', 'DawidSkene']
+    #temps = [0.0, 1.0, 2.0]
+    #get_stats(method_names, temps, stories)
     # analyze_rsps_bytemp('shoesresults_full.csv', 5)
     # crowd_bytemp('Wawa', 1.0, 2.0)
     # crowd_bytemp('DawidSkene', 1.0, 2.0)
