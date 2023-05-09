@@ -950,24 +950,8 @@ def results_folder(outfolder, match_prefix):
     for f in os.listdir():
         if f.startswith('matchwsuff' + match_prefix) and f.endswith('.csv'):
             os.replace(f, os.path.join(outfolder, f))
-        
-    
-    
 
-if __name__=='__main__':
-    #this is a representative row, 
-    #in that the first is a true positive, next is false positive, next is true negative, next is false negative
-    # rep_row = [23, 25, 46, 0, 29, 31]
-    # rep_row = [2, 12, 30, 0, 1, 3, 46, 201, 302, 44, 136, 207]
-    # ditto_dct = {2 : True, 12 : True, 30 : True, 0 : False, 1 : False, 3 : False, 46 : True, 201 : True, 302 : True, 44 : False, 136 : False, 207 : False}
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--stories", nargs='+', default=STORIES, choices=STORIES)
-    parser.add_argument("--datasets", nargs='+', default=DATASETS, choices=DATASETS)
-    parser.add_argument("--reps", type=int, default=10)
-    parser.add_argument("--temps", type=float, nargs='+', default=[2.0])
-    parser.add_argument("--key", type=int, required=True)
-    args = parser.parse_args()
-
+def query(args):
     load_dotenv()
     openai.api_key = os.getenv(f"OPENAI_API_KEY{args.key}")
     # plain_vs_storysuff('../ditto_erdata/Amazon-Google.csv', 'detective', [0.0, 1.0, 2.0], 'temperature', rep_row)
@@ -983,6 +967,27 @@ if __name__=='__main__':
             for s in args.stories:
                 print(f"Story {s}")
                 storysuff(f'er_results/{d}.csv', s, args.temps, 'temperature', rep_row, match_prefix, num_reps=num_reps)
+    
+    
+
+if __name__=='__main__':
+    #this is a representative row, 
+    #in that the first is a true positive, next is false positive, next is true negative, next is false negative
+    # rep_row = [23, 25, 46, 0, 29, 31]
+    # rep_row = [2, 12, 30, 0, 1, 3, 46, 201, 302, 44, 136, 207]
+    # ditto_dct = {2 : True, 12 : True, 30 : True, 0 : False, 1 : False, 3 : False, 46 : True, 201 : True, 302 : True, 44 : False, 136 : False, 207 : False}
+    parser = argparse.ArgumentParser()
+    subparsers = parser.add_subparsers(required=True)
+    parser_query = subparsers.add_parser('query')
+    parser_query.add_argument("--stories", nargs='+', default=STORIES, choices=STORIES)
+    parser_query.add_argument("--datasets", nargs='+', default=DATASETS, choices=DATASETS)
+    parser_query.add_argument("--reps", type=int, default=10)
+    parser_query.add_argument("--temps", type=float, nargs='+', default=[2.0])
+    parser_query.add_argument("--key", type=int, required=True)
+    parser_query.set_defaults(func=query)
+    args = parser.parse_args()
+    args.func(args)
+
     # plain_vs_lang('chinese (traditional)', [0.0, 0.5, 0.9, 1.4], 'temperature', rep_row)
     # combine_results('detective', 'storytemp_sepclear')
     # for i in range(10):
