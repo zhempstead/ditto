@@ -1,5 +1,5 @@
 gensim==3.8.1
-numpy==1.19.2
+numpy>=1.21
 regex==2019.12.20
 scipy==1.3.2
 sentencepiece==0.1.85
@@ -14,3 +14,5 @@ pandas
 openai
 tenacity
 python-dotenv
+crowd-kit
+googletrans
