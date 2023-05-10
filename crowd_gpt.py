@@ -277,7 +277,7 @@ def plain_vs_storysuff(match_file, story_name, samp_range : list, samp_type, row
                 outdf = pd.DataFrame(outdct)
                 outdf.to_csv(outname)
 
-def storysuff(match_file, story_name, samp_range : list, samp_type, rows, match_prefix, num_reps=10):
+def storysuff(match_file, story_name, samp_range : list, samp_type, rows, match_prefix, num_reps=10, shots=0, shot_df=None):
     '''
     Query chatGPT with the given story on the given rows of the match file at different temperatures,
     repeating each prompt a specified number of times at each temperature.
