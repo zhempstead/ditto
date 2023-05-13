@@ -21,7 +21,7 @@ class IntegrationPrompt:
     def get_chat(self, candidate1, candidate2, examples, followup):
         chat = []
         include_preamble = True
-        for idx, example in examples:
+        for example in examples:
             message = self.get_prompt(example[0], example[1], include_preamble=include_preamble) + ' ' + followup
             chat.append({"role": "user", "content": message})
             include_preamble = False

@@ -6,6 +6,7 @@ import argparse
 from dotenv import load_dotenv
 import os
 from pathlib import Path
+import re
 from crowdkit.aggregation import MajorityVote, Wawa, DawidSkene
 from googletrans import Translator
 from tenacity import (
@@ -84,8 +85,7 @@ def response_wtemp(prompt_tmp, row1, row2, temp_val, timeout=30):
     
     return chat_explanation, chat_response
 
-@retry(retry=retry_if_exception_type(Exception), wait=wait_random_exponential(min=1, max=60), stop=stop_after_attempt(6))
-def response_suffwtemp(prompt_tmp, row1, row2, temp_val, timeout=30):
+def build_chat(prompt_tmp, row1, row2, examples=[]):
     fullprompt = prompt_tmp.get_prompt(row1, row2)
     
     followup = 'Begin your answer with YES or NO.'
@@ -93,7 +93,11 @@ def response_suffwtemp(prompt_tmp, row1, row2, temp_val, timeout=30):
         translator = Translator()
         followup = translator.translate(followup, src='english', dest=fullprompt.lang).text
     chat = [{"role": "system", "content": "You are a helpful assistant who can only answer YES or NO and then explain your reasoning."}]
-    chat += prompt_tmp.get_chat(row1, row2, [], followup)
+    chat += prompt_tmp.get_chat(row1, row2, examples, followup)
+    return chat
+
+@retry(retry=retry_if_exception_type(Exception), wait=wait_random_exponential(min=1, max=60), stop=stop_after_attempt(6))
+def raw_response(chat, temp_val, lang='english', timeout=30):
     print("Sending: {}".format(chat))
     signal.signal(signal.SIGALRM, handler)
     signal.alarm(timeout)
@@ -105,11 +109,15 @@ def response_suffwtemp(prompt_tmp, row1, row2, temp_val, timeout=30):
     )
     chat_response = response["choices"][0]["message"]["content"]
     
-    if prompt_tmp.lang != 'english':
+    if lang != 'english':
         translator = Translator()
         chat_response = translator.translate(chat_response, src=prompt_tmp.lang, dest='english').text
     
     return chat_response
+
+def response_suffwtemp(prompt_tmp, row1, row2, temp_val, timeout=30):
+    chat = build_chat(prompt_tmp, row1, row2)
+    return raw_response(chat, temp_val, lang=prompt_tmp.lang, timeout=timeout)
 
 @retry(retry=retry_if_exception_type(Exception), wait=wait_random_exponential(min=1, max=60), stop=stop_after_attempt(6))
 def response_wtopp(prompt_tmp, row1, row2, topp_val, timeout=30):
@@ -317,6 +325,10 @@ def storysuff(match_file, story_name, samp_range : list, samp_type, rows, match_
     
     df = pd.read_csv(match_file)
     outdir = Path('matchwsuff')
+
+    shot_yes = shot_df[shot_df['match']].sample(n=len(df)*shots, replace=True, random_state=100).reset_index(drop=True)
+    shot_no = shot_df[~shot_df['match']].sample(n=len(df)*shots, replace=True, random_state=100).reset_index(drop=True)
+
     
     for r_ind in rows:
         dfrow = df.loc[r_ind]
@@ -324,22 +336,35 @@ def storysuff(match_file, story_name, samp_range : list, samp_type, rows, match_
         match = get_candidate(dfrow)
         for i in range(num_reps):
             for sval in samp_range:
-                outname = outdir / ('-'.join([match_prefix, story_name, str(r_ind), f'rep{i}', f'{samp_type}{str(sval).replace(".", "_")}', '0shot']) + '.csv')
+                outname = outdir / ('-'.join([match_prefix, story_name, str(r_ind), f'rep{i}', f'{samp_type}{str(sval).replace(".", "_")}', f'{shots}shot']) + '.csv')
                 if outname.exists():
                     print(f"{outname} exists...")
                     continue
                 if samp_type == 'temperature':
-                    story_response = response_suffwtemp(story_tmp, match[0], match[1], sval)
+                    examples = []
+                    shot_idx = r_ind * shots
+                    for i in range(shots):
+                        examples.append((shot_yes.loc[shot_idx, 'left'], shot_yes.loc[shot_idx, 'right'], 'YES.'))
+                        examples.append((shot_no.loc[shot_idx, 'left'], shot_no.loc[shot_idx, 'right'], 'NO.'))
+                        shot_idx += 1
+                    chat = build_chat(story_tmp, match[0], match[1], examples)
+                    story_response = raw_response(chat, sval)
+                    story_answer = parse_enresponse(story_response)
+                    if story_answer == -1:
+                        chat.append({'role': 'assistant', 'content': story_response})
+                        chat.append({'role': 'user', 'content': "Please answer in a single word (YES or NO). If you are uncertain, make your best guess."})
+                        story_response = raw_response(chat, sval)
+                        story_answer = parse_enresponse(story_response)
                 else:
                     raise Exception("Sampling Type not supported: {}".format(samp_type))
                 
-                story_answer = parse_enresponse(story_response)
                 outdct = {}
                 outdct['Match File'] = [match_file]
                 outdct['Row No'] = [r_ind]
                 outdct['Rep No'] = [i]
                 outdct['Sampling Type'] = [samp_type]
                 outdct['Sampling Param'] = [sval]
+                outdct['Shots'] = [shots]
                 outdct['Story Name'] = [story_name]
                 outdct['Story Response'] = [story_response]
                 outdct['Story Answer'] = [story_answer]
@@ -492,7 +517,7 @@ def analyze_singlerep(fname, temp_level, rep_no):
     
     print("Stats: {}".format(stats_dct))
 
-def crowd_gather(fullfname, temp, ditto_dct):
+def crowd_gather(raw_df, temp):
     '''
     Run different crowd methods on all chatgpt responses.
 
@@ -510,7 +535,6 @@ def crowd_gather(fullfname, temp, ditto_dct):
     None.
 
     '''
-    raw_df = pd.read_csv(fullfname)
     df = raw_df[raw_df['Sampling Param'] == temp]
     out_schema = ['worker', 'task', 'label']
     out_dct = {}
@@ -546,7 +570,8 @@ def crowd_gather(fullfname, temp, ditto_dct):
     wawa_dct = agg_wawa.to_dict()
     ds_dct = agg_ds.to_dict()
     
-    res_schema = ['Match File', 'Row No', 'Vote', 'Ditto Answer', 'Ground Truth']
+    #res_schema = ['Match File', 'Row No', 'Vote', 'Ditto Answer', 'Ground Truth']
+    res_schema = ['Match File', 'Row No', 'Vote', 'Ground Truth']
     mv_res = {}
     wawa_res = {}
     ds_res = {}
@@ -575,17 +600,17 @@ def crowd_gather(fullfname, temp, ditto_dct):
         wawa_res['Ground Truth'].append(pair_gt)
         ds_res['Ground Truth'].append(pair_gt)
         
-        mv_res['Ditto Answer'].append(ditto_dct[pair[1]])
-        wawa_res['Ditto Answer'].append(ditto_dct[pair[1]])
-        ds_res['Ditto Answer'].append(ditto_dct[pair[1]])
+        #mv_res['Ditto Answer'].append(ditto_dct[pair[1]])
+        #wawa_res['Ditto Answer'].append(ditto_dct[pair[1]])
+        #ds_res['Ditto Answer'].append(ditto_dct[pair[1]])
     
     mv_df = pd.DataFrame(mv_res)
     wawa_df = pd.DataFrame(wawa_res)
     ds_df = pd.DataFrame(ds_res)
     
-    mv_df.to_csv('MajorityVote_results' + '-temperature' + str(temp).replace('.', '_') + '.csv', index=False)
-    wawa_df.to_csv('Wawa_results' + '-temperature' + str(temp).replace('.', '_') + '.csv', index=False)
-    ds_df.to_csv('DawidSkene_results' + '-temperature' + str(temp).replace('.', '_') + '.csv', index=False)
+    mv_df.to_csv('er_analysis/MajorityVote_results' + '-temperature' + str(temp).replace('.', '_') + '.csv', index=False)
+    wawa_df.to_csv('er_analysis/Wawa_results' + '-temperature' + str(temp).replace('.', '_') + '.csv', index=False)
+    ds_df.to_csv('er_analysis/DawidSkene_results' + '-temperature' + str(temp).replace('.', '_') + '.csv', index=False)
 
 def crowd_analysis(fullfname, temp, ditto_dct):
     raw_df = pd.read_csv(fullfname)
@@ -672,7 +697,7 @@ def crowd_analysis(fullfname, temp, ditto_dct):
     wawa_df.to_csv('Wawa_analysis' + '-temperature' + str(temp).replace('.', '_') + '.csv', index=False)
     ds_df.to_csv('DawidSkene_analysis' + '-temperature' + str(temp).replace('.', '_') + '.csv', index=False)
 
-def perprompt_majorities(fullfname, temp):
+def perprompt_majorities(df, temp):
     '''
     Compute the majority response across iterations for the same prompt.
 
@@ -688,7 +713,6 @@ def perprompt_majorities(fullfname, temp):
     None.
 
     '''
-    df = pd.read_csv(fullfname)
     tmpdf = df[df['Sampling Param'] == temp]
     out_schema = ['Match File', 'Row No', 'Prompt', 'Yes Votes', 'No Votes', 'Majority']
     out_dct = {}
@@ -722,7 +746,7 @@ def perprompt_majorities(fullfname, temp):
                     out_dct['Majority'].append(False)
     
     out_df = pd.DataFrame(out_dct)
-    out_df.to_csv('per_promptresults_tmperature' + str(temp).replace('.', '_') + '.csv', index=False)
+    out_df.to_csv('er_analysis/per_promptresults_tmperature' + str(temp).replace('.', '_') + '.csv', index=False)
 
 def get_stats(method_names, temps, story_names):
     '''
@@ -742,8 +766,9 @@ def get_stats(method_names, temps, story_names):
     None.
 
     '''
-    stat_schema = ['Method Name', 'Temperature', 'Ditto Precision', 'Ditto Recall',
-                   'Ditto f1', 'Crowd Precision', 'Crowd Recall', 'Crowd f1']
+    #stat_schema = ['Method Name', 'Temperature', 'Ditto Precision', 'Ditto Recall',
+    #               'Ditto f1', 'Crowd Precision', 'Crowd Recall', 'Crowd f1']
+    stat_schema = ['Method Name', 'Temperature', 'Crowd Precision', 'Crowd Recall', 'Crowd f1']
     
     for sn in story_names:
         sprec = sn + ' Precision'
@@ -757,23 +782,23 @@ def get_stats(method_names, temps, story_names):
     
     for mn in method_names:
         for tmp in temps:
-            vote_file = mn + '_results-temperature' + str(tmp).replace('.', '_') + '.csv'
+            vote_file = 'er_analysis/' + mn + '_results-temperature' + str(tmp).replace('.', '_') + '.csv'
             df = pd.read_csv(vote_file)
             df['Vote_bool'] = (df['Vote'] == 1)
             
-            ditto_tps = df[(df['Ditto Answer'] == df['Ground Truth']) & (df['Ground Truth'] == True)].shape[0]
-            ditto_tns = df[(df['Ditto Answer'] == df['Ground Truth']) & (df['Ground Truth'] == False)].shape[0]
-            ditto_fps = df[(df['Ditto Answer'] != df['Ground Truth']) & (df['Ground Truth'] == False)].shape[0]
-            ditto_fns = df[(df['Ditto Answer'] != df['Ground Truth']) & (df['Ground Truth'] == True)].shape[0]
+            #ditto_tps = df[(df['Ditto Answer'] == df['Ground Truth']) & (df['Ground Truth'] == True)].shape[0]
+            #ditto_tns = df[(df['Ditto Answer'] == df['Ground Truth']) & (df['Ground Truth'] == False)].shape[0]
+            #ditto_fps = df[(df['Ditto Answer'] != df['Ground Truth']) & (df['Ground Truth'] == False)].shape[0]
+            #ditto_fns = df[(df['Ditto Answer'] != df['Ground Truth']) & (df['Ground Truth'] == True)].shape[0]
             
             our_tps = df[(df['Vote_bool'] == df['Ground Truth']) & (df['Ground Truth'] == True)].shape[0]
             our_tns = df[(df['Vote_bool'] == df['Ground Truth']) & (df['Ground Truth'] == False)].shape[0]
             our_fps = df[(df['Vote_bool'] != df['Ground Truth']) & (df['Ground Truth'] == False)].shape[0]
             our_fns = df[(df['Vote_bool'] != df['Ground Truth']) & (df['Ground Truth'] == True)].shape[0]
             
-            ditto_precision = ditto_tps / (ditto_tps + ditto_fps)
-            ditto_recall = ditto_tps / (ditto_tps + ditto_fns)
-            ditto_f1 = 2 * (ditto_precision * ditto_recall) / (ditto_precision + ditto_recall)
+            #ditto_precision = ditto_tps / (ditto_tps + ditto_fps)
+            #ditto_recall = ditto_tps / (ditto_tps + ditto_fns)
+            #ditto_f1 = 2 * (ditto_precision * ditto_recall) / (ditto_precision + ditto_recall)
             
             our_precision = our_tps / (our_tps + our_fps)
             our_recall = our_tps / (our_tps + our_fns)
@@ -781,14 +806,14 @@ def get_stats(method_names, temps, story_names):
             
             stats_dct['Method Name'].append(mn)
             stats_dct['Temperature'].append(tmp)
-            stats_dct['Ditto Precision'].append(ditto_precision)
-            stats_dct['Ditto Recall'].append(ditto_recall)
-            stats_dct['Ditto f1'].append(ditto_f1)
+            #stats_dct['Ditto Precision'].append(ditto_precision)
+            #stats_dct['Ditto Recall'].append(ditto_recall)
+            #stats_dct['Ditto f1'].append(ditto_f1)
             stats_dct['Crowd Precision'].append(our_precision)
             stats_dct['Crowd Recall'].append(our_recall)
             stats_dct['Crowd f1'].append(our_f1)
             
-            story_df = pd.read_csv('per_promptresults_tmperature' + str(tmp).replace('.', '_') + '.csv')
+            story_df = pd.read_csv('er_analysis/per_promptresults_tmperature' + str(tmp).replace('.', '_') + '.csv')
             for sn in story_names:
                 sndf = story_df[story_df['Prompt'] == sn]
                 ans_dct = {}
@@ -821,7 +846,92 @@ def get_stats(method_names, temps, story_names):
                 
     
     stats_df = pd.DataFrame(stats_dct)
-    stats_df.to_csv('dittovsmultiprompt_stats.csv', index=False)
+    stats_df.to_csv('er_analysis/dittovsmultiprompt_stats.csv', index=False)
+
+def get_stats2(method_names, temperatures, story_names):
+    '''
+    Generate a csv to compare the precision, recall, f1 of crowd methods, individual prompt responses, etc. to baselines
+
+    Parameters
+    ----------
+    method_names : TYPE
+        DESCRIPTION.
+    temps : TYPE
+        DESCRIPTION.
+    story_names : TYPE
+        DESCRIPTION.
+
+    Returns
+    -------
+    None.
+
+    '''
+
+    method2df = {}
+    story2df = {}
+    for mn in method_names:
+        for temp in temperatures:
+            strtemp = str(temp).replace('.', '_')
+            method2df[(mn, temp)] = pd.read_csv(f'er_analysis/{mn}_results-temperature{strtemp}.csv')
+
+    for temp in temperatures:
+        strtemp = str(temp).replace('.', '_')
+        story_df = pd.read_csv(f'er_analysis/per_promptresults_tmperature{strtemp}.csv')
+        for sn in story_names:
+            story2df[(sn, temp)] = story_df[story_df['Prompt'] == sn]
+    truth_df = method2df[(method_names[0], temperatures[0])][['Match File', 'Row No', 'Ground Truth']].copy()
+
+    out_dict = {'Dataset': [], 'Method': [], 'Temp': [], 'Crowd': [], 'F1': [], 'Precision': [], 'Recall': []}
+
+    for mn in method_names:
+        for temp in temperatures:
+            full_df = method2df[(mn, temp)]
+            full_df['Vote'] = (full_df['Vote'] == 1)
+
+            for dataset, df in full_df.groupby('Match File'):
+                our_tps = df[(df['Vote'] == df['Ground Truth']) & (df['Ground Truth'] == True)].shape[0]
+                our_tns = df[(df['Vote'] == df['Ground Truth']) & (df['Ground Truth'] == False)].shape[0]
+                our_fps = df[(df['Vote'] != df['Ground Truth']) & (df['Ground Truth'] == False)].shape[0]
+                our_fns = df[(df['Vote'] != df['Ground Truth']) & (df['Ground Truth'] == True)].shape[0]
+            
+                our_precision = our_tps / (our_tps + our_fps)
+                our_recall = our_tps / (our_tps + our_fns)
+                our_f1 = 2 * (our_precision * our_recall) / (our_precision + our_recall)
+
+                out_dict['Dataset'].append(dataset.split('/')[1].split('.')[0])
+                out_dict['Method'].append(mn)
+                out_dict['Temp'].append(temp)
+                out_dict['Crowd'].append(True)
+                out_dict['F1'].append(our_f1)
+                out_dict['Precision'].append(our_precision)
+                out_dict['Recall'].append(our_recall)
+            
+    for sn in story_names:
+        for temp in temperatures:
+            full_df = story2df[(sn, temp)]
+            full_df['Vote'] = full_df['Majority']
+            full_df = full_df.merge(truth_df, on=['Match File', 'Row No'])
+
+            for dataset, df in full_df.groupby('Match File'):
+                our_tps = df[(df['Vote'] == df['Ground Truth']) & (df['Ground Truth'] == True)].shape[0]
+                our_tns = df[(df['Vote'] == df['Ground Truth']) & (df['Ground Truth'] == False)].shape[0]
+                our_fps = df[(df['Vote'] != df['Ground Truth']) & (df['Ground Truth'] == False)].shape[0]
+                our_fns = df[(df['Vote'] != df['Ground Truth']) & (df['Ground Truth'] == True)].shape[0]
+            
+                our_precision = our_tps / (our_tps + our_fps)
+                our_recall = our_tps / (our_tps + our_fns)
+                our_f1 = 2 * (our_precision * our_recall) / (our_precision + our_recall)
+
+                out_dict['Dataset'].append(dataset.split('/')[1].split('.')[0])
+                out_dict['Method'].append(sn)
+                out_dict['Temp'].append(temp)
+                out_dict['Crowd'].append(False)
+                out_dict['F1'].append(our_f1)
+                out_dict['Precision'].append(our_precision)
+                out_dict['Recall'].append(our_recall)
+
+    pd.DataFrame(out_dict).to_csv('er_analysis/stats.csv', index=False)
+    
 
 def get_singlerepstats(fullfname):
     '''
@@ -960,14 +1070,84 @@ def query(args):
         for d in args.datasets:
             print(f"Dataset {d}:")
             maindf = pd.read_csv(f'er_results/{d}.csv')
+            traindf = pd.read_csv(f'er_train/{d}.csv')
             match_prefix = d
             match_outfolder = f'{d}results'
             ditto_dct = maindf['match'].to_dict()
             rep_row = ditto_dct.keys()
             for s in args.stories:
                 print(f"Story {s}")
-                storysuff(f'er_results/{d}.csv', s, args.temps, 'temperature', rep_row, match_prefix, num_reps=num_reps)
-    
+                storysuff(f'er_results/{d}.csv', s, args.temps, 'temperature', rep_row, match_prefix, num_reps=num_reps, shots=args.shots, shot_df=traindf)
+
+
+def combine(args):
+    os.makedirs('er_analysis', exist_ok=True)
+    #regex = re.compile(r'(?P<dataset>[A-Za-z]+(-[A-Za-z]+)?)-(?P<story>[a-z]+)-(?P<row>[0-9]+)-rep(?P<rep>[0-9]+)-temperature(?P<temp>[0-2])_0-(?P<shot>[0-9])shot.csv')
+    small_dfs = []
+    big_dfs = []
+    counter = 0
+    for f in Path('matchwsuff').glob(f'*.csv'):
+        df = pd.read_csv(f)
+        small_dfs.append(df)
+        if len(df) > 1:
+            import pdb; pdb.set_trace()
+        counter += 1
+        if counter % 1000 == 0:
+            print(f'{counter}...')
+            big_dfs.append(pd.concat(small_dfs))
+            small_dfs = []
+    print("Concatting...")
+    df = pd.concat(big_dfs)
+    print("Writing...")
+    df.to_csv(f'er_analysis/full.csv', index=False)
+
+def analyze(args):
+    result_file = "er_analysis/full.csv"
+    df = pd.read_csv(result_file)
+    df = df[~df['Sampling Param'].isna()]
+    df['Rep No'] = df['Rep No'].astype(float).astype(int)
+    df['Row No'] = df['Row No'].astype(float).astype(int)
+    if args.reps is not None:
+        df = df[df['Rep No'] < args.reps]
+    for temp in args.temps:
+        print(f"Temp {temp}:")
+        crowd_gather(df, temp)
+        perprompt_majorities(df, temp)
+    get_stats2(["MajorityVote", "Wawa", "DawidSkene"], args.temps, args.stories)
+
+def retry(args):
+    load_dotenv()
+    openai.api_key = os.getenv(f"OPENAI_API_KEY{args.key}")
+    result_file = "er_analysis/full.csv"
+    mf2df = {}
+    full_df = pd.read_csv(result_file)
+    to_fix = full_df[full_df['Story Answer'] == -1.0]
+    total = len(to_fix)
+    fixed = 0
+    progress = 0
+    for idx, row in to_fix.iterrows():
+        mf = row['Match File']
+        if mf not in mf2df:
+            mf2df[mf] = pd.read_csv(mf)
+        df = mf2df[mf]
+        source_row = mf2df[mf].loc[row['Row No']]
+        story_tmp = TEMPLATES[row['Story Name']]
+        chat = build_chat(story_tmp, source_row['left'], source_row['right'])
+        response = row['Story Response']
+        if type(response) == str:
+            chat.append({'role': 'assistant', 'content': row['Story Response']})
+        chat.append({'role': 'user', 'content': "Please answer just YES or NO. If you are uncertain, make your best guess."})
+        resp = raw_response(chat, row['Sampling Param'])
+        answer = parse_enresponse(resp)
+        progress += 1
+        if answer != -1:
+            fixed += 1
+        print(f"Fixed {fixed}/{progress}; total {total}")
+        full_df.loc[idx, 'Story Answer'] = answer
+        if progress % 100 == 0:
+            full_df.to_csv(result_file, index=False)
+    full_df.to_csv(result_file, index=False) 
+        
     
 
 if __name__=='__main__':
@@ -978,43 +1158,28 @@ if __name__=='__main__':
     # ditto_dct = {2 : True, 12 : True, 30 : True, 0 : False, 1 : False, 3 : False, 46 : True, 201 : True, 302 : True, 44 : False, 136 : False, 207 : False}
     parser = argparse.ArgumentParser()
     subparsers = parser.add_subparsers(required=True)
+
     parser_query = subparsers.add_parser('query')
     parser_query.add_argument("--stories", nargs='+', default=STORIES, choices=STORIES)
     parser_query.add_argument("--datasets", nargs='+', default=DATASETS, choices=DATASETS)
     parser_query.add_argument("--reps", type=int, default=10)
     parser_query.add_argument("--temps", type=float, nargs='+', default=[2.0])
     parser_query.add_argument("--key", type=int, required=True)
+    parser_query.add_argument("--shots", type=int, default=0)
     parser_query.set_defaults(func=query)
+
+    parser_combine = subparsers.add_parser('combine')
+    parser_combine.set_defaults(func=combine)
+
+    parser_analyze = subparsers.add_parser('analyze')
+    parser_analyze.add_argument("--reps", type=int, default=10)
+    parser_analyze.add_argument("--temps", type=float, nargs='+', default=[2.0])
+    parser_analyze.add_argument("--stories", nargs='+', default=STORIES, choices=STORIES)
+    parser_analyze.set_defaults(func=analyze)
+
+    parser_retry = subparsers.add_parser('retry')
+    parser_retry.add_argument("--key", type=int, required=True)
+    parser_retry.set_defaults(func=retry)
+
     args = parser.parse_args()
     args.func(args)
-
-    # plain_vs_lang('chinese (traditional)', [0.0, 0.5, 0.9, 1.4], 'temperature', rep_row)
-    # combine_results('detective', 'storytemp_sepclear')
-    # for i in range(10):
-    #     test_tempwresp(timeout=60)
-    # count_garbage()
-    # combine_storyresults('detective', 'nogarb')
-    #results_folder('../ditto_erdata/shoes.csv', match_outfolder, match_prefix)
-    #combine_storiesresults('../ditto_erdata/shoes.csv', match_outfolder)
-    # analyze_singlerep('nogarb_full.csv', 2.0, 0)
-    #fullresult_file = match_outfolder + '_full.csv'
-    #crowd_gather(fullresult_file, 0.0, ditto_dct)
-    #crowd_gather(fullresult_file, 1.0, ditto_dct)
-    #crowd_gather(fullresult_file, 2.0, ditto_dct)
-    # crowd_analysis('shoesresults_full.csv', 2.0, ditto_dct)
-    #perprompt_majorities(fullresult_file, 0.0)
-    #perprompt_majorities(fullresult_file, 1.0)
-    #perprompt_majorities(fullresult_file, 2.0)
-    # get_stats('DawidSkene_results-temperature2_0.csv')
-    # get_stats('MajorityVote_results-temperature2_0.csv')
-    # get_stats('Wawa_results-temperature2_0.csv')
-    
-    #method_names = ['MajorityVote', 'Wawa', 'DawidSkene']
-    #temps = [0.0, 1.0, 2.0]
-    #get_stats(method_names, temps, stories)
-    # analyze_rsps_bytemp('shoesresults_full.csv', 5)
-    # crowd_bytemp('Wawa', 1.0, 2.0)
-    # crowd_bytemp('DawidSkene', 1.0, 2.0)
-    
-    
-
