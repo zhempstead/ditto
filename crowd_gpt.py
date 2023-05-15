@@ -285,7 +285,7 @@ def plain_vs_storysuff(match_file, story_name, samp_range : list, samp_type, row
                 outdf = pd.DataFrame(outdct)
                 outdf.to_csv(outname)
 
-def storysuff(match_file, story_name, samp_range : list, samp_type, rows, match_prefix, num_reps=10, shots=0, shot_df=None):
+def storysuff(match_file, story_name, samp_range : list, samp_type, rows, match_prefix, num_reps=10, shots=0, shot_df=None, outdir='matchwsuff'):
     '''
     Query chatGPT with the given story on the given rows of the match file at different temperatures,
     repeating each prompt a specified number of times at each temperature.
@@ -324,7 +324,7 @@ def storysuff(match_file, story_name, samp_range : list, samp_type, rows, match_
     story_tmp = TEMPLATES[story_name]
     
     df = pd.read_csv(match_file)
-    outdir = Path('matchwsuff')
+    outdir = Path(outdir)
 
     shot_yes = shot_df[shot_df['match']].sample(n=len(df)*shots, replace=True, random_state=100).reset_index(drop=True)
     shot_no = shot_df[~shot_df['match']].sample(n=len(df)*shots, replace=True, random_state=100).reset_index(drop=True)
@@ -517,7 +517,7 @@ def analyze_singlerep(fname, temp_level, rep_no):
     
     print("Stats: {}".format(stats_dct))
 
-def crowd_gather(raw_df, temp):
+def crowd_gather(raw_df, temp, outdir):
     '''
     Run different crowd methods on all chatgpt responses.
 
@@ -608,9 +608,9 @@ def crowd_gather(raw_df, temp):
     wawa_df = pd.DataFrame(wawa_res)
     ds_df = pd.DataFrame(ds_res)
     
-    mv_df.to_csv('er_analysis/MajorityVote_results' + '-temperature' + str(temp).replace('.', '_') + '.csv', index=False)
-    wawa_df.to_csv('er_analysis/Wawa_results' + '-temperature' + str(temp).replace('.', '_') + '.csv', index=False)
-    ds_df.to_csv('er_analysis/DawidSkene_results' + '-temperature' + str(temp).replace('.', '_') + '.csv', index=False)
+    mv_df.to_csv(outdir + '/MajorityVote_results' + '-temperature' + str(temp).replace('.', '_') + '.csv', index=False)
+    wawa_df.to_csv(outdir + '/Wawa_results' + '-temperature' + str(temp).replace('.', '_') + '.csv', index=False)
+    ds_df.to_csv(outdir + '/DawidSkene_results' + '-temperature' + str(temp).replace('.', '_') + '.csv', index=False)
 
 def crowd_analysis(fullfname, temp, ditto_dct):
     raw_df = pd.read_csv(fullfname)
@@ -697,7 +697,7 @@ def crowd_analysis(fullfname, temp, ditto_dct):
     wawa_df.to_csv('Wawa_analysis' + '-temperature' + str(temp).replace('.', '_') + '.csv', index=False)
     ds_df.to_csv('DawidSkene_analysis' + '-temperature' + str(temp).replace('.', '_') + '.csv', index=False)
 
-def perprompt_majorities(df, temp):
+def perprompt_majorities(df, temp, outdir):
     '''
     Compute the majority response across iterations for the same prompt.
 
@@ -746,9 +746,9 @@ def perprompt_majorities(df, temp):
                     out_dct['Majority'].append(False)
     
     out_df = pd.DataFrame(out_dct)
-    out_df.to_csv('er_analysis/per_promptresults_tmperature' + str(temp).replace('.', '_') + '.csv', index=False)
+    out_df.to_csv(outdir + '/per_promptresults_tmperature' + str(temp).replace('.', '_') + '.csv', index=False)
 
-def get_stats(method_names, temps, story_names):
+def get_stats(method_names, temps, story_names, outdir):
     '''
     Generate a csv to compare the precision, recall, f1 of crowd methods, individual prompt responses, etc. to baselines
 
@@ -782,7 +782,7 @@ def get_stats(method_names, temps, story_names):
     
     for mn in method_names:
         for tmp in temps:
-            vote_file = 'er_analysis/' + mn + '_results-temperature' + str(tmp).replace('.', '_') + '.csv'
+            vote_file = outdir + '/' + mn + '_results-temperature' + str(tmp).replace('.', '_') + '.csv'
             df = pd.read_csv(vote_file)
             df['Vote_bool'] = (df['Vote'] == 1)
             
@@ -813,7 +813,7 @@ def get_stats(method_names, temps, story_names):
             stats_dct['Crowd Recall'].append(our_recall)
             stats_dct['Crowd f1'].append(our_f1)
             
-            story_df = pd.read_csv('er_analysis/per_promptresults_tmperature' + str(tmp).replace('.', '_') + '.csv')
+            story_df = pd.read_csv(outdir + '/per_promptresults_tmperature' + str(tmp).replace('.', '_') + '.csv')
             for sn in story_names:
                 sndf = story_df[story_df['Prompt'] == sn]
                 ans_dct = {}
@@ -846,9 +846,9 @@ def get_stats(method_names, temps, story_names):
                 
     
     stats_df = pd.DataFrame(stats_dct)
-    stats_df.to_csv('er_analysis/dittovsmultiprompt_stats.csv', index=False)
+    stats_df.to_csv(outdir + '/dittovsmultiprompt_stats.csv', index=False)
 
-def get_stats2(method_names, temperatures, story_names):
+def get_stats2(method_names, temperatures, story_names, outdir):
     '''
     Generate a csv to compare the precision, recall, f1 of crowd methods, individual prompt responses, etc. to baselines
 
@@ -872,11 +872,11 @@ def get_stats2(method_names, temperatures, story_names):
     for mn in method_names:
         for temp in temperatures:
             strtemp = str(temp).replace('.', '_')
-            method2df[(mn, temp)] = pd.read_csv(f'er_analysis/{mn}_results-temperature{strtemp}.csv')
+            method2df[(mn, temp)] = pd.read_csv(f'{outdir}/{mn}_results-temperature{strtemp}.csv')
 
     for temp in temperatures:
         strtemp = str(temp).replace('.', '_')
-        story_df = pd.read_csv(f'er_analysis/per_promptresults_tmperature{strtemp}.csv')
+        story_df = pd.read_csv(f'{outdir}/per_promptresults_tmperature{strtemp}.csv')
         for sn in story_names:
             story2df[(sn, temp)] = story_df[story_df['Prompt'] == sn]
     truth_df = method2df[(method_names[0], temperatures[0])][['Match File', 'Row No', 'Ground Truth']].copy()
@@ -930,7 +930,7 @@ def get_stats2(method_names, temperatures, story_names):
                 out_dict['Precision'].append(our_precision)
                 out_dict['Recall'].append(our_recall)
 
-    pd.DataFrame(out_dict).to_csv('er_analysis/stats.csv', index=False)
+    pd.DataFrame(out_dict).to_csv(f'{outdir}/stats.csv', index=False)
     
 
 def get_singlerepstats(fullfname):
@@ -1077,16 +1077,18 @@ def query(args):
             rep_row = ditto_dct.keys()
             for s in args.stories:
                 print(f"Story {s}")
-                storysuff(f'er_results/{d}.csv', s, args.temps, 'temperature', rep_row, match_prefix, num_reps=num_reps, shots=args.shots, shot_df=traindf)
+                storysuff(f'er_results/{d}.csv', s, args.temps, 'temperature', rep_row, match_prefix, num_reps=num_reps, shots=args.shots, shot_df=traindf, outdir=args.rawdir)
 
 
 def combine(args):
-    os.makedirs('er_analysis', exist_ok=True)
+    os.makedirs(args.outdir, exist_ok=True)
     #regex = re.compile(r'(?P<dataset>[A-Za-z]+(-[A-Za-z]+)?)-(?P<story>[a-z]+)-(?P<row>[0-9]+)-rep(?P<rep>[0-9]+)-temperature(?P<temp>[0-2])_0-(?P<shot>[0-9])shot.csv')
     small_dfs = []
     big_dfs = []
     counter = 0
-    for f in Path('matchwsuff').glob(f'*.csv'):
+    #print("Fixing '^M' characters...")
+    #os.system(f"""cd {args.rawdir} && echo ./* | xargs sed -i 's/#/ /g'""")
+    for f in Path(args.rawdir).glob(f'*.csv'):
         df = pd.read_csv(f)
         small_dfs.append(df)
         if len(df) > 1:
@@ -1099,10 +1101,10 @@ def combine(args):
     print("Concatting...")
     df = pd.concat(big_dfs)
     print("Writing...")
-    df.to_csv(f'er_analysis/full.csv', index=False)
+    df.to_csv(f'{args.outdir}/full.csv', index=False)
 
 def analyze(args):
-    result_file = "er_analysis/full.csv"
+    result_file = f"{args.outdir}/full.csv"
     df = pd.read_csv(result_file)
     df = df[~df['Sampling Param'].isna()]
     df['Rep No'] = df['Rep No'].astype(float).astype(int)
@@ -1118,7 +1120,7 @@ def analyze(args):
 def retry(args):
     load_dotenv()
     openai.api_key = os.getenv(f"OPENAI_API_KEY{args.key}")
-    result_file = "er_analysis/full.csv"
+    result_file = f"{args.outdir}/full.csv"
     mf2df = {}
     full_df = pd.read_csv(result_file)
     to_fix = full_df[full_df['Story Answer'] == -1.0]
@@ -1166,19 +1168,24 @@ if __name__=='__main__':
     parser_query.add_argument("--temps", type=float, nargs='+', default=[2.0])
     parser_query.add_argument("--key", type=int, required=True)
     parser_query.add_argument("--shots", type=int, default=0)
+    parser_query.add_argument("--rawdir", required=True)
     parser_query.set_defaults(func=query)
 
     parser_combine = subparsers.add_parser('combine')
+    parser_combine.add_argument("--rawdir", required=True)
+    parser_combine.add_argument("--outdir", required=True)
     parser_combine.set_defaults(func=combine)
 
     parser_analyze = subparsers.add_parser('analyze')
     parser_analyze.add_argument("--reps", type=int, default=10)
     parser_analyze.add_argument("--temps", type=float, nargs='+', default=[2.0])
     parser_analyze.add_argument("--stories", nargs='+', default=STORIES, choices=STORIES)
+    parser_analyze.add_argument("--outdir", required=True)
     parser_analyze.set_defaults(func=analyze)
 
     parser_retry = subparsers.add_parser('retry')
     parser_retry.add_argument("--key", type=int, required=True)
+    parser_retry.add_argument("--rawdir", required=True)
     parser_retry.set_defaults(func=retry)
 
     args = parser.parse_args()
