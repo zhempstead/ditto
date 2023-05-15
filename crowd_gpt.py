@@ -461,9 +461,9 @@ def analyze(args):
         df = df[df['Rep No'] < args.reps]
     for temp in args.temps:
         print(f"Temp {temp}:")
-        crowd_gather(df, temp)
-        perprompt_majorities(df, temp)
-    get_stats(["MajorityVote", "Wawa", "DawidSkene"], args.temps, args.stories)
+        crowd_gather(df, temp, args.outdir)
+        perprompt_majorities(df, temp, args.outdir)
+    get_stats(["MajorityVote", "Wawa", "DawidSkene"], args.temps, args.stories, args.outdir)
 
 def retry(args):
     load_dotenv()
