@@ -129,6 +129,38 @@ def generate_baselinetemp():
     baselineprompt = IntegrationPrompt(preamble, c1sentence, c2sentence, question)
     return baselineprompt
 
+def generate_baseline_negative_temp():
+    preamble = 'We are trying to integrate product data from two different databases. The goal is to look at two product entries, one from each database, and determine whether the two entries refer to the same product or not. Since the databases are different, there will still be some differences between entries that refer to the same product.'
+    c1sentence = 'Here is an entry from the first database:'
+    c2sentence = 'Here is an entry from the second database:'
+    question = 'False positives are worse than false negatives - only say YES if you are pretty confident. As best as you can tell, do these entries refer to the same product?'
+    baselineprompt = IntegrationPrompt(preamble, c1sentence, c2sentence, question)
+    return baselineprompt
+
+def generate_baseline_positive_temp():
+    preamble = 'We are trying to integrate product data from two different databases. The goal is to look at two product entries, one from each database, and determine whether the two entries refer to the same product or not. Since the databases are different, there will still be some differences between entries that refer to the same product.'
+    c1sentence = 'Here is an entry from the first database:'
+    c2sentence = 'Here is an entry from the second database:'
+    question = 'False negatives are worse than false positives - only say NO if you are pretty confident. As best as you can tell, do these entries refer to the same product?'
+    baselineprompt = IntegrationPrompt(preamble, c1sentence, c2sentence, question)
+    return baselineprompt
+
+def generate_baseline_front_temp():
+    preamble = 'We are trying to integrate product data from two different databases. The goal is to look at two product entries, one from each database, and determine whether the two entries refer to the same product or not. Since the databases are different, there will still be some differences between entries that refer to the same product.'
+    c1sentence = 'Here is an entry from the first database:'
+    c2sentence = 'Here is an entry from the second database:'
+    question = 'Pay more attention to the first half of each entry - it is more informative. As best as you can tell, do these entries refer to the same product?'
+    baselineprompt = IntegrationPrompt(preamble, c1sentence, c2sentence, question)
+    return baselineprompt
+
+def generate_baseline_back_temp():
+    preamble = 'We are trying to integrate product data from two different databases. The goal is to look at two product entries, one from each database, and determine whether the two entries refer to the same product or not. Since the databases are different, there will still be some differences between entries that refer to the same product.'
+    c1sentence = 'Here is an entry from the first database:'
+    c2sentence = 'Here is an entry from the second database:'
+    question = 'Pay more attention to the second half of each entry - it is more informative. As best as you can tell, do these entries refer to the same product?'
+    baselineprompt = IntegrationPrompt(preamble, c1sentence, c2sentence, question)
+    return baselineprompt
+
 def generate_plaintemp():
     preamble = 'Consider the following pair of csv file rows:'
     c1sentence = ''
@@ -160,6 +192,10 @@ TEMPLATES = {
     'security': generate_securitytemp(),
     'journalist': generate_journalisttemp(),
     'baseline': generate_baselinetemp(),
+    'baselinenegative': generate_baseline_negative_temp(),
+    'baselinepositive': generate_baseline_positive_temp(),
+    'baselinefront': generate_baseline_front_temp(),
+    'baselineback': generate_baseline_back_temp(),
     'plain': generate_plaintemp(),
     'veryplain': generate_veryplaintemp(),
 }

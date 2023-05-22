@@ -510,7 +510,7 @@ if __name__=='__main__':
     subparsers = parser.add_subparsers(required=True)
 
     parser_query = subparsers.add_parser('query')
-    parser_query.add_argument("--stories", nargs='+', default=STORIES, choices=STORIES)
+    parser_query.add_argument("--stories", nargs='+', default=STORIES, choices=list(TEMPLATES.keys()))
     parser_query.add_argument("--datasets", nargs='+', default=DATASETS, choices=DATASETS)
     parser_query.add_argument("--reps", type=int, default=10)
     parser_query.add_argument("--temps", type=float, nargs='+', default=[2.0])
@@ -527,7 +527,7 @@ if __name__=='__main__':
     parser_analyze = subparsers.add_parser('analyze')
     parser_analyze.add_argument("--reps", type=int, default=10)
     parser_analyze.add_argument("--temps", type=float, nargs='+', default=[2.0])
-    parser_analyze.add_argument("--stories", nargs='+', default=STORIES, choices=STORIES)
+    parser_analyze.add_argument("--stories", nargs='+', default=STORIES, choices=list(TEMPLATES.keys()))
     parser_analyze.add_argument("--outdir", required=True)
     parser_analyze.set_defaults(func=analyze)
 
