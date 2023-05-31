@@ -10,18 +10,22 @@ from tenacity import (
 )  # for exponential backoff
 
 FINETUNED_MODELS = {
-    ('all', 'small', 'ada'): "ada:ft-university-of-chicago-2023-04-11-06-11-59",
-    ('all', 'small', 'curie'): "curie:ft-university-of-chicago-2023-04-11-05-38-00",
-    ('all', 'large', 'ada'): "ada:ft-university-of-chicago-2023-04-11-05-48-56",
+    #('all', 'small', 'ada'): "ada:ft-university-of-chicago-2023-04-11-06-11-59",
+    #('all', 'small', 'curie'): "curie:ft-university-of-chicago-2023-04-11-05-38-00",
+    #('all', 'large', 'ada'): "ada:ft-university-of-chicago-2023-04-11-05-48-56",
     ('cameras', 'small', 'ada'): "ada:ft-university-of-chicago-2023-04-07-21-15-23",
     ('cameras', 'small', 'curie'): "curie:ft-university-of-chicago-2023-04-07-21-17-27",
     ('cameras', 'large', 'ada'): "ada:ft-university-of-chicago-2023-04-10-22-46-30",
     ('cameras', 'large', 'curie'): "curie:ft-university-of-chicago-2023-04-10-22-46-10",
+    ('computers', 'small', 'ada'): "ada:ft-university-of-chicago-2023-04-26-23-17-07",
+    ('computers', 'large', 'ada'): "ada:ft-university-of-chicago-2023-04-26-23-41-37",
     ('shoes', 'small', 'ada'): "ada:ft-university-of-chicago-2023-04-10-23-10-45",
     ('shoes', 'small', 'curie'): "curie:ft-university-of-chicago-2023-04-10-23-14-33",
     ('shoes', 'large', 'ada'): "ada:ft-university-of-chicago-2023-04-07-22-21-08",
     ('shoes', 'large', 'curie'): "curie:ft-university-of-chicago-2023-04-10-22-03-04",
     ('shoes', 'xlarge', 'ada'): "ada:ft-university-of-chicago-2023-04-10-22-10-02",
+    ('watches', 'small', 'ada'): "ada:ft-university-of-chicago-2023-04-27-00-04-59",
+    ('watches', 'large', 'ada'): "ada:ft-university-of-chicago-2023-04-27-04-49-15",
     ('Amazon-Google', None, 'ada'): "ada:ft-university-of-chicago-2023-04-11-17-00-45",
     ('Amazon-Google', None, 'curie'): "curie:ft-university-of-chicago-2023-04-11-16-54-37",
 }
