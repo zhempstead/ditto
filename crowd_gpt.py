@@ -89,7 +89,7 @@ def parse_enresponse(response):
     else:
         return -1
 
-def storysuff(match_file, story_name, samp_range : list, samp_type, rows, match_prefix, num_reps=10, shots=0, shot_df=None, outdir='matchwsuff'):
+def storysuff(match_file, story_name, samp_range : list, samp_type, rows, match_prefix, num_reps=10, shots=0, shot_df=None, uniform_shot_offset=None, outdir='matchwsuff'):
     '''
     Query chatGPT with the given story on the given rows of the match file at different temperatures,
     repeating each prompt a specified number of times at each temperature.
@@ -146,11 +146,13 @@ def storysuff(match_file, story_name, samp_range : list, samp_type, rows, match_
                     continue
                 if samp_type == 'temperature':
                     examples = []
-                    shot_idx = r_ind * shots
                     for i in range(shots):
+                        if uniform_shot_offset is not None:
+                            shot_idx = uniform_shot_offset * shots + i
+                        else:
+                            shot_idx = r_ind * shots + i
                         examples.append((shot_yes.loc[shot_idx, 'left'], shot_yes.loc[shot_idx, 'right'], 'YES.'))
                         examples.append((shot_no.loc[shot_idx, 'left'], shot_no.loc[shot_idx, 'right'], 'NO.'))
-                        shot_idx += 1
                     chat = build_chat(story_tmp, match[0], match[1], examples)
                     story_response = raw_response(chat, sval)
                     story_answer = parse_enresponse(story_response)
@@ -413,6 +415,9 @@ def get_stats(method_names, temperatures, story_names, outdir):
 def query(args):
     load_dotenv()
     openai.api_key = os.getenv(f"OPENAI_API_KEY{args.key}")
+    uniform_shot_offset = None
+    if args.uniform_shots:
+        uniform_shot_offset = args.uniform_shot_offset
     for num_reps in range(1, args.reps + 1):
         print(f"Rep {num_reps}:")
         for d in args.datasets:
@@ -425,7 +430,7 @@ def query(args):
             rep_row = ditto_dct.keys()
             for s in args.stories:
                 print(f"Story {s}")
-                storysuff(f'er_results/{d}.csv', s, args.temps, 'temperature', rep_row, match_prefix, num_reps=num_reps, shots=args.shots, shot_df=traindf, outdir=args.rawdir)
+                storysuff(f'er_results/{d}.csv', s, args.temps, 'temperature', rep_row, match_prefix, num_reps=num_reps, shots=args.shots, shot_df=traindf, uniform_shot_offset=uniform_shot_offset, outdir=args.rawdir)
 
 
 def combine(args):
@@ -516,6 +521,8 @@ if __name__=='__main__':
     parser_query.add_argument("--temps", type=float, nargs='+', default=[2.0])
     parser_query.add_argument("--key", type=int, required=True)
     parser_query.add_argument("--shots", type=int, default=0)
+    parser_query.add_argument("--uniform-shots", action='store_true')
+    parser_query.add_argument("--uniform-shot-offset", type=int, default=0)
     parser_query.add_argument("--rawdir", required=True)
     parser_query.set_defaults(func=query)
 
