@@ -11,7 +11,8 @@ gpu_id = 0
 
 for d in datasets:
     for size in sizes:
-        dataset = '_'.join(['wdc', d, size])
+        test_task = '_'.join(['wdc', d, size])
+        train_task = '_'.join(['wdc', 'cameras', size])
         for dk in [True]:
             for da in [True]:
                 #for run_id in range(5):
@@ -26,7 +27,7 @@ for d in datasets:
                       --batch_size 64 \
                       --lr 3e-5 \
                       --n_epochs 10 \
-                      --run_id %d""" % (gpu_id, 'wdc_cameras_xlarge', dataset, run_id)
+                      --run_id %d""" % (gpu_id, test_task, train_task, run_id)
                     if da:
                         cmd += ' --da del'
                     if dk:
