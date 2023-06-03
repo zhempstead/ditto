@@ -1,4 +1,4 @@
-datasets = ["all","computers", "cameras", "shoes", "watches"]
+datasets = ["computers", "cameras", "shoes", "watches"]
 attrs = ['title', 'title_description', 'title_description_brand', 'title_description_brand_specTableContent']
 sizes = ["small", "medium", "large", "xlarge"]
 
@@ -10,7 +10,7 @@ import time
 gpu_id = 0
 
 for d in datasets:
-    for size in ["xlarge"]:
+    for size in sizes:
         dataset = '_'.join(['wdc', d, size])
         for dk in [True]:
             for da in [True]:
@@ -21,6 +21,7 @@ for d in datasets:
                       --logdir results_wdc/ \
                       --fp16 \
                       --finetuning \
+                      --save_model \
                       --batch_size 64 \
                       --lr 3e-5 \
                       --n_epochs 10 \

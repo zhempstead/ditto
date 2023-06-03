@@ -53,7 +53,7 @@ lms = ['roberta', 'roberta', 'roberta', 'roberta', 'roberta', 'roberta',
 
 
 for dataset, op, lm in zip(datasets, ops, lms):
-    if dataset != "Textual/Company":
+    if dataset != "Structured/Amazon-Google":
         continue
     if dataset in special_datasets:
         batch_size, epochs = special_datasets[dataset]
@@ -67,6 +67,7 @@ for dataset, op, lm in zip(datasets, ops, lms):
               --task %s \
               --logdir results_ditto/ \
               --finetuning \
+              --save_model \
               --batch_size %d \
               --lr 3e-5 \
               --fp16 \
