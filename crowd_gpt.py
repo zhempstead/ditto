@@ -439,8 +439,8 @@ def combine(args):
     small_dfs = []
     big_dfs = []
     counter = 0
-    #print("Fixing '^M' characters...")
-    #os.system(f"""cd {args.rawdir} && echo ./* | xargs sed -i 's/#/ /g'""")
+    print("Fixing '^M' characters...")
+    os.system(f"bash ./fix_newline.sh {args.rawdir}")
     for f in Path(args.rawdir).glob(f'*.csv'):
         df = pd.read_csv(f)
         small_dfs.append(df)
@@ -463,7 +463,7 @@ def analyze(args):
     df['Rep No'] = df['Rep No'].astype(float).astype(int)
     df['Row No'] = df['Row No'].astype(float).astype(int)
     if args.reps is not None:
-        df = df[df['Rep No'] < args.reps]
+        df = df[df['Rep No'] <= args.reps]
     for temp in args.temps:
         print(f"Temp {temp}:")
         crowd_gather(df, temp, args.outdir)
