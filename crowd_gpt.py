@@ -19,7 +19,7 @@ from prompt_generator import TEMPLATES
 
 
 STORIES = ['baseline', 'plain', 'veryplain', 'customer', 'journalist', 'security', 'layperson', 'detective']
-DATASETS = ['cameras', 'computers', 'shoes', 'watches', 'Amazon-Google']
+DATASETS = ['cameras', 'computers', 'shoes', 'watches']
 
 '''
 Purpose: Run multiple prompts with multiple temperatures,

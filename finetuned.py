@@ -73,9 +73,11 @@ if __name__ == '__main__':
     #dataset = 'cameras'
     #data_size = 'large'
     #model = 'curie'
-
+    '''
     for (dataset, data_size, model) in FINETUNED_MODELS.keys():
-        if dataset != "Amazon-Google":
+        if model != 'ada':
+            continue
+        if data_size == 'xlarge':
             continue
         print(dataset, data_size, model)
         if data_size is None:
@@ -85,3 +87,12 @@ if __name__ == '__main__':
         df = pd.read_csv(f'er_results/{dataset}.csv')
         df = add_results(df, colname, FINETUNED_MODELS[(dataset, data_size, model)])
         df.to_csv(f'er_results/{dataset}.csv', index=False)
+    '''
+    for dataset in ['computers', 'shoes', 'watches']:
+        for size in ['small', 'large']:
+            print(dataset, size)
+            model = FINETUNED_MODELS[('cameras', size, 'ada')]
+            colname = f'pred_finetune_cameras_ada_{size}'
+            df = pd.read_csv(f'er_results/{dataset}.csv')
+            df = add_results(df, colname, model)
+            df.to_csv(f'er_results/{dataset}.csv', index=False)
