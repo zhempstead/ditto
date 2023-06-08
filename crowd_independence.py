@@ -1,10 +1,10 @@
+import argparse
+
 from pathlib import Path
 
 import pandas as pd
 from scipy import stats
 from sklearn import metrics
-
-RESULTS_DIR = Path('../gpt_di/entity_resolution/crowd-temp0-shots2-results')
 
 CROWD_METHODS = ['DawidSkene', 'MajorityVote', 'Wawa']
 
@@ -49,7 +49,15 @@ def print_dataset_f1s(df_pivot, crowd_members):
         print_overall_f1s(df_pivot[df_pivot['Match File'] == dataset], crowd_members)
 
 if __name__ == '__main__':
-    df = pd.read_csv(RESULTS_DIR / 'full.csv')
+    parser = argparse.ArgumentParser()
+    parser.add_argument("results_root")
+    parser.add_argument("--experiment", default="crowd-temp0-shots2-results")
+    parser.add_argument("--temp", default='0.0')
+    args = parser.parse_args()
+    exp_dir = Path(args.results_root) / 'entity_resolution' / args.experiment
+    temp_str = args.temp.replace('.', '_')
+
+    df = pd.read_csv(exp_dir / 'full.csv')
     df.loc[df['Story Answer'] == -1, 'Story Answer'] = 0
     # Boolean to int
     df['Ground Truth'] = df['Ground Truth'] * 1
@@ -58,7 +66,7 @@ if __name__ == '__main__':
 
     df_pivot = story_pivot(df)
     for method in CROWD_METHODS:
-        crowd_df = pd.read_csv(RESULTS_DIR / f'{method}_results-temperature0_0.csv')
+        crowd_df = pd.read_csv(exp_dir / f'{method}_results-temperature{temp_str}.csv')
         crowd_df = crowd_df.rename(columns={'Vote': method})
         crowd_df = crowd_df[['Match File', 'Row No', method]]
         df_pivot = df_pivot.merge(crowd_df, on=['Match File', 'Row No'])
