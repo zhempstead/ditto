@@ -423,7 +423,10 @@ def query(args):
         for d in args.datasets:
             print(f"Dataset {d}:")
             maindf = pd.read_csv(f'er_results/{d}.csv')
-            traindf = pd.read_csv(f'er_train/{d}.csv')
+            if args.shot_dataset is None:
+                traindf = pd.read_csv(f'er_train/{d}.csv')
+            else:
+                traindf = pd.read_csv(f'er_train/{args.shot_dataset}.csv')
             match_prefix = d
             match_outfolder = f'{d}results'
             ditto_dct = maindf['match'].to_dict()
@@ -452,7 +455,7 @@ def combine(args):
             big_dfs.append(pd.concat(small_dfs))
             small_dfs = []
     print("Concatting...")
-    df = pd.concat(big_dfs)
+    df = pd.concat(big_dfs + small_dfs)
     print("Writing...")
     df.to_csv(f'{args.outdir}/full.csv', index=False)
 
@@ -521,6 +524,7 @@ if __name__=='__main__':
     parser_query.add_argument("--temps", type=float, nargs='+', default=[2.0])
     parser_query.add_argument("--key", type=int, required=True)
     parser_query.add_argument("--shots", type=int, default=0)
+    parser_query.add_argument("--shot-dataset", default=None, choices=DATASETS)
     parser_query.add_argument("--uniform-shots", action='store_true')
     parser_query.add_argument("--uniform-shot-offset", type=int, default=0)
     parser_query.add_argument("--rawdir", required=True)
