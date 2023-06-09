@@ -20,6 +20,7 @@ from prompt_generator import TEMPLATES
 
 STORIES = ['baseline', 'plain', 'veryplain', 'customer', 'journalist', 'security', 'layperson', 'detective']
 DATASETS = ['cameras', 'computers', 'shoes', 'watches']
+ALL_DATASETS = DATASETS + ['Amazon-Google', 'new_wdc']
 
 '''
 Purpose: Run multiple prompts with multiple temperatures,
@@ -519,12 +520,12 @@ if __name__=='__main__':
 
     parser_query = subparsers.add_parser('query')
     parser_query.add_argument("--stories", nargs='+', default=STORIES, choices=list(TEMPLATES.keys()))
-    parser_query.add_argument("--datasets", nargs='+', default=DATASETS, choices=DATASETS)
+    parser_query.add_argument("--datasets", nargs='+', default=DATASETS, choices=ALL_DATASETS)
     parser_query.add_argument("--reps", type=int, default=10)
     parser_query.add_argument("--temps", type=float, nargs='+', default=[2.0])
     parser_query.add_argument("--key", type=int, required=True)
     parser_query.add_argument("--shots", type=int, default=0)
-    parser_query.add_argument("--shot-dataset", default=None, choices=DATASETS)
+    parser_query.add_argument("--shot-dataset", default=None, choices=ALL_DATASETS)
     parser_query.add_argument("--uniform-shots", action='store_true')
     parser_query.add_argument("--uniform-shot-offset", type=int, default=0)
     parser_query.add_argument("--rawdir", required=True)

@@ -26,8 +26,17 @@ for infile in list(indir.rglob('*.txt.*')) + list(indir.rglob('*.txt')):
             line = line.replace('"', '')
             line = re.sub(COLVAL, r'\n\1: ', line)
             left, right, y = line.split('\t')
+
             left = left.strip()
+            left = left.split('\n')
+            left = [l[:1000] for l in left]
+            left = '\n'.join(left)
+
             right = right.strip()
+            right = right.split('\n')
+            right = [r[:1000] for r in right]
+            right = '\n'.join(right)
+
             prompt = f"{left}\n\n###\n\n{right}\n\n###\n\nSame product?"
             y = bool(int(y))
             completion = " yes" if y else " no"
