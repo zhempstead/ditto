@@ -62,6 +62,11 @@ def get_label(row):
             return (f'ChatGPT Crowd + 2-Shot', 8)
         elif row['Method'] == 'baseline':
             return (f'ChatGPT + 2-Shot', 6)
+    elif row['Experiment'] == 'crowd-temp0-shots2c-results':
+        if row['Method'] == CROWD_METHOD:
+            return (f'ChatGPT Crowd + 2-Shot (cameras)', 11)
+        elif row['Method'] == 'baseline':
+            return (f'ChatGPT + 2-Shot (cameras)', 10)
     elif row['Experiment'] == 'crowd-temp2-shots2-results':
         if row['Method'] == CROWD_METHOD:
             return (f'ChatGPT Crowd + Reps + 2-Shot', 9)
@@ -71,7 +76,7 @@ def get_label(row):
         return (f'Ditto ({row["Dataset Size"]})', order)
     elif row['Experiment'].startswith('finetune'):
         return (f'Finetuned Ada ({row["Dataset Size"]})', 1 + order)
-    return (None, 10)
+    return (None, 12)
 
         
 if __name__ == '__main__':
@@ -85,7 +90,7 @@ if __name__ == '__main__':
     fig = plot_grouped(df_1, 'Plot 1')
     fig.savefig('plot_1.png')
 
-    df_2 = df[(df['Dataset'] != 'cameras') & (df['Order'].isin([0.5, 0.6, 0.7, 0.8, 1.5, 1.6, 1.7, 1.8, 4]))]
+    df_2 = df[(df['Dataset'] != 'cameras') & (df['Order'].isin([0.5, 0.6, 0.7, 0.8, 1.5, 1.6, 1.7, 1.8, 2, 4, 10, 11, 6, 8]))]
     fig = plot_grouped(df_2, 'Plot 2')
     fig.savefig('plot_2.png')
 
