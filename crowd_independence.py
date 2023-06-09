@@ -2,14 +2,15 @@ import argparse
 
 from pathlib import Path
 
+from crowdkit.aggregation import MajorityVote, Wawa, DawidSkene
 import pandas as pd
 from scipy import stats
 from sklearn import metrics
 
-CROWD_METHODS = ['DawidSkene', 'MajorityVote', 'Wawa']
+CROWD_METHODS = {'DawidSkene': DawidSkene(n_iter=10), 'MajorityVote': MajorityVote(), 'Wawa': Wawa()}
 
 def story_pivot(df):
-    return df.pivot(columns='Story Name', index=['Match File', 'Row No', 'Ground Truth'], values='Story Answer').reset_index()
+    return df.pivot(columns='Story Name', index=['task', 'Match File', 'Row No', 'Ground Truth'], values='Story Answer').reset_index()
 
 def independence_test(df, col1, col2):
     res = stats.chi2_contingency(pd.crosstab(df[col1], df[col2]))
@@ -37,8 +38,12 @@ def print_correlations(df):
     print(dfs[False].corr())
 
 def print_overall_f1s(df_pivot, crowd_members):
-    for col in list(crowd_members) + CROWD_METHODS:
-        print(col, metrics.f1_score(df_pivot['Ground Truth'], df_pivot[col]))
+    f1s = []
+    for col in crowd_members:
+        f1s.append((metrics.f1_score(df_pivot['Ground Truth'], df_pivot[col]), col))
+    for metric, col in sorted(f1s, reverse=True):
+        print(col, metric)
+    return [(col, metric) for metric, col in sorted(f1s, reverse=True)]
 
 
 def print_dataset_f1s(df_pivot, crowd_members):
@@ -58,6 +63,8 @@ if __name__ == '__main__':
     temp_str = args.temp.replace('.', '_')
 
     df = pd.read_csv(exp_dir / 'full.csv')
+    df['task'] = df['Match File'] + ': ' + df['Row No'].astype(str)
+    prompts = df['Story Name'].unique()
     df.loc[df['Story Answer'] == -1, 'Story Answer'] = 0
     # Boolean to int
     df['Ground Truth'] = df['Ground Truth'] * 1
@@ -65,11 +72,28 @@ if __name__ == '__main__':
     print_correlations(df)
 
     df_pivot = story_pivot(df)
-    for method in CROWD_METHODS:
-        crowd_df = pd.read_csv(exp_dir / f'{method}_results-temperature{temp_str}.csv')
-        crowd_df = crowd_df.rename(columns={'Vote': method})
-        crowd_df = crowd_df[['Match File', 'Row No', method]]
-        df_pivot = df_pivot.merge(crowd_df, on=['Match File', 'Row No'])
-    print_overall_f1s(df_pivot, ['baseline', 'layperson'])
-    print_dataset_f1s(df_pivot, ['baseline', 'layperson'])
+    #for method in CROWD_METHODS.keys():
+    #    crowd_df = pd.read_csv(exp_dir / f'{method}_results-temperature{temp_str}.csv')
+    #    crowd_df = crowd_df.rename(columns={'Vote': method})
+    #    crowd_df = crowd_df[['Match File', 'Row No', method]]
+    #    df_pivot = df_pivot.merge(crowd_df, on=['Match File', 'Row No'])
+    #print_overall_f1s(df_pivot, ['baseline', 'layperson'])
+    #print_dataset_f1s(df_pivot, ['baseline', 'layperson'])
+    f1_ordered = print_overall_f1s(df_pivot, prompts)
+    dfc = df.copy()
+    dfc = dfc.rename(columns={"Story Name": "worker", "Story Answer": "label"})
+    #f1_ordered.reverse()
+    for col, f1 in f1_ordered:
+        print()
+        print(f"{col}: {f1}")
+        print("---")
+        for method, mfunc in CROWD_METHODS.items():
+            mseries = mfunc.fit_predict(dfc)
+            joined = df_pivot.merge(mseries, on='task')
+            f1 = metrics.f1_score(joined['Ground Truth'], joined['agg_label'])
+            print(f"{method}: {f1}")
+        dfc = dfc[dfc['worker'] != col]
+            
+
+    #print_dataset_f1s(df_pivot, prompts)
     import pdb; pdb.set_trace()
