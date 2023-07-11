@@ -1,13 +1,10 @@
 import pandas as pd
-import pickle
 import openai
 import signal
 import argparse
 from dotenv import load_dotenv
 import os
 from pathlib import Path
-import re
-from crowdkit.aggregation import MajorityVote, Wawa, DawidSkene
 from googletrans import Translator
 from tenacity import (
     retry,
@@ -17,10 +14,9 @@ from tenacity import (
 )  # for exponential backoff
 from prompt_generator import TEMPLATES
 
-
 STORIES = ['baseline', 'plain', 'veryplain', 'customer', 'journalist', 'security', 'layperson', 'detective']
 DATASETS = ['cameras', 'computers', 'shoes', 'watches']
-ALL_DATASETS = DATASETS + ['Amazon-Google', 'new_wdc']
+ALL_DATASETS = DATASETS + ['Amazon-Google', 'wdc_seen', 'wdc_half', 'wdc_unseen', 'wdc']
 
 '''
 Purpose: Run multiple prompts with multiple temperatures,
@@ -41,33 +37,35 @@ def handler(signum, frame):
 def get_candidate(df_row):
     leftrow = df_row['left']
     rightrow = df_row['right']
-    leftrow = leftrow.replace('\n', '\t')
-    leftrow = ' "' + leftrow + '".'
-    rightrow = rightrow.replace('\n', '\t')
-    rightrow = ' "' + rightrow + '".'
     return (leftrow, rightrow)
 
-def build_chat(prompt_tmp, row1, row2, examples=[]):
+def build_chat(prompt_tmp, row1, row2, examples=[], cot=False):
     fullprompt = prompt_tmp.get_prompt(row1, row2)
     
-    followup = 'Begin your answer with YES or NO.'
+    if cot:
+        followup = '\n\nAnswer: Let\'s think step-by-step.'
+        system = "You are a helpful assistant who thinks step-by-step and then gives final yes or no answers."
+    else:
+        followup = 'Begin your answer with YES or NO.'
+        system = "You are a helpful assistant who can only answer YES or NO and then explain your reasoning."
+
     if prompt_tmp.lang != 'english':
         translator = Translator()
         followup = translator.translate(followup, src='english', dest=fullprompt.lang).text
-    chat = [{"role": "system", "content": "You are a helpful assistant who can only answer YES or NO and then explain your reasoning."}]
+    chat = [{"role": "system", "content": system}]
     chat += prompt_tmp.get_chat(row1, row2, examples, followup)
     return chat
 
 @retry(retry=retry_if_exception_type(Exception), wait=wait_random_exponential(min=1, max=60), stop=stop_after_attempt(6))
-def raw_response(chat, temp_val, lang='english', timeout=30):
+def raw_response(chat, temp_val, lang='english', timeout=30, max_tokens=30):
     print("Sending: {}".format(chat))
     signal.signal(signal.SIGALRM, handler)
     signal.alarm(timeout)
     response = openai.ChatCompletion.create(
-        model="gpt-3.5-turbo",
+        model="gpt-3.5-turbo-0301",
         messages=chat,
         temperature=temp_val,
-        max_tokens=30
+        max_tokens=max_tokens,
     )
     chat_response = response["choices"][0]["message"]["content"]
     
@@ -82,7 +80,14 @@ def response_suffwtemp(prompt_tmp, row1, row2, temp_val, timeout=30):
     return raw_response(chat, temp_val, lang=prompt_tmp.lang, timeout=timeout)
 
 
-def parse_enresponse(response):
+def parse_enresponse(response, cot=False):
+    if cot:
+        if 'yes' in response.lower()[-6:]:
+            return 1
+        elif 'no' in response.lower()[-6:]:
+            return 0
+        else:
+            return -1
     if response.lower().startswith('yes'):
         return 1
     elif response.lower().startswith('no'):
@@ -90,7 +95,7 @@ def parse_enresponse(response):
     else:
         return -1
 
-def storysuff(match_file, story_name, samp_range : list, samp_type, rows, match_prefix, num_reps=10, shots=0, shot_df=None, uniform_shot_offset=None, outdir='matchwsuff'):
+def storysuff(match_file, story_name, samp_range : list, samp_type, rows, match_prefix, num_reps=10, shots=0, shot_df=None, uniform_shot_offset=None, outdir='matchwsuff', cot=False, shot_fullrandom=False):
     '''
     Query chatGPT with the given story on the given rows of the match file at different temperatures,
     repeating each prompt a specified number of times at each temperature.
@@ -122,18 +127,26 @@ def storysuff(match_file, story_name, samp_range : list, samp_type, rows, match_
     None.
 
     '''
-    
-    #story_fname = 'all_prompts/' + story_name + 'prompt_english.pkl'
-    #with open(story_fname, 'rb') as fh:
-    #    story_tmp = pickle.load(fh)
     story_tmp = TEMPLATES[story_name]
     
     df = pd.read_csv(match_file)
     outdir = Path(outdir)
 
-    shot_yes = shot_df[shot_df['match']].sample(n=len(df)*shots, replace=True, random_state=100).reset_index(drop=True)
-    shot_no = shot_df[~shot_df['match']].sample(n=len(df)*shots, replace=True, random_state=100).reset_index(drop=True)
+    if shot_fullrandom:
+        shot_yes = shot_df[shot_df['match']].sample(n=len(df)*shots, replace=True).reset_index(drop=True)
+        shot_no = shot_df[~shot_df['match']].sample(n=len(df)*shots, replace=True).reset_index(drop=True)
+    else:
+        shot_yes = shot_df[shot_df['match']].sample(n=len(df)*shots, replace=True, random_state=100).reset_index(drop=True)
+        shot_no = shot_df[~shot_df['match']].sample(n=len(df)*shots, replace=True, random_state=100).reset_index(drop=True)
+    if story_name == 'customer':
+        if cot:
+            raise ValueError("CoT not compatible with 'customer' worker")
+        shot_yes, shot_no = shot_no, shot_yes
 
+    if cot:
+        max_tokens = 300
+    else:
+        max_tokens = 30
     
     for r_ind in rows:
         dfrow = df.loc[r_ind]
@@ -147,21 +160,28 @@ def storysuff(match_file, story_name, samp_range : list, samp_type, rows, match_
                     continue
                 if samp_type == 'temperature':
                     examples = []
-                    for i in range(shots):
+                    for j in range(shots):
                         if uniform_shot_offset is not None:
-                            shot_idx = uniform_shot_offset * shots + i
+                            shot_idx = uniform_shot_offset * shots + j
                         else:
-                            shot_idx = r_ind * shots + i
-                        examples.append((shot_yes.loc[shot_idx, 'left'], shot_yes.loc[shot_idx, 'right'], 'YES.'))
-                        examples.append((shot_no.loc[shot_idx, 'left'], shot_no.loc[shot_idx, 'right'], 'NO.'))
-                    chat = build_chat(story_tmp, match[0], match[1], examples)
-                    story_response = raw_response(chat, sval)
-                    story_answer = parse_enresponse(story_response)
+                            shot_idx = r_ind * shots + j
+                        if cot:
+                            examples.append((shot_yes.loc[shot_idx, 'left'], shot_yes.loc[shot_idx, 'right'], shot_yes.loc[shot_idx, 'cot']))
+                            examples.append((shot_no.loc[shot_idx, 'left'], shot_no.loc[shot_idx, 'right'], shot_no.loc[shot_idx, 'cot']))
+                        else:
+                            examples.append((shot_yes.loc[shot_idx, 'left'], shot_yes.loc[shot_idx, 'right'], 'YES.'))
+                            examples.append((shot_no.loc[shot_idx, 'left'], shot_no.loc[shot_idx, 'right'], 'NO.'))
+                    print(outdir.name, i, match_prefix, story_name, r_ind)
+                    chat = build_chat(story_tmp, match[0], match[1], examples, cot=cot)
+                    story_response = raw_response(chat, sval, max_tokens=max_tokens)
+                    story_answer = parse_enresponse(story_response, cot=cot)
                     if story_answer == -1:
                         chat.append({'role': 'assistant', 'content': story_response})
-                        chat.append({'role': 'user', 'content': "Please answer in a single word (YES or NO). If you are uncertain, make your best guess."})
-                        story_response = raw_response(chat, sval)
-                        story_answer = parse_enresponse(story_response)
+                        if cot:
+                            chat.append({'role': 'user', 'content': "What is your final answer? Please answer in a single word (YES or NO). If you are uncertain, make your best guess."})
+                            chat.append({'role': 'user', 'content': "Please answer in a single word (YES or NO). If you are uncertain, make your best guess."})
+                        story_response2 = raw_response(chat, sval, max_tokens=5)
+                        story_answer = parse_enresponse(story_response2, cot=False)
                 else:
                     raise Exception("Sampling Type not supported: {}".format(samp_type))
                 
@@ -178,239 +198,6 @@ def storysuff(match_file, story_name, samp_range : list, samp_type, rows, match_
                 outdct['Ground Truth'] = [row_gt]
                 outdf = pd.DataFrame(outdct)
                 outdf.to_csv(outname)
-    
-
-def crowd_gather(raw_df, temp, outdir):
-    '''
-    Run different crowd methods on all chatgpt responses.
-
-    Parameters
-    ----------
-    fullfname : TYPE
-        DESCRIPTION.
-    temp : TYPE
-        DESCRIPTION.
-    ditto_dct : TYPE
-        DESCRIPTION.
-
-    Returns
-    -------
-    None.
-
-    '''
-    df = raw_df[raw_df['Sampling Param'] == temp]
-    out_schema = ['worker', 'task', 'label']
-    out_dct = {}
-    for o in out_schema:
-        out_dct[o] = []
-    
-    raw_labels = df['Story Answer'].tolist()
-    new_labels = [max(x, 0) for x in raw_labels] #change -1s to 0s.
-    
-    out_dct['worker'] = df['Story Name'].tolist()
-    out_dct['label'] = new_labels
-    matchfiles = df['Match File'].tolist()
-    rownos = df['Row No'].tolist()
-    tasklst = []
-    pairslst = []
-    
-    for i in range(len(matchfiles)):
-        new_el = matchfiles[i] + ':' + str(rownos[i])
-        tasklst.append(new_el)
-        pairslst.append((matchfiles[i], rownos[i]))
-    
-    pairsset = set(pairslst)
-    
-    out_dct['task'] = tasklst
-    
-    out_df = pd.DataFrame(out_dct)
-    
-    agg_mv = MajorityVote().fit_predict(out_df)
-    agg_wawa = Wawa().fit_predict(out_df)
-    agg_ds = DawidSkene(n_iter=10).fit_predict(out_df)
-    
-    mv_dct = agg_mv.to_dict()
-    wawa_dct = agg_wawa.to_dict()
-    ds_dct = agg_ds.to_dict()
-    
-    #res_schema = ['Match File', 'Row No', 'Vote', 'Ditto Answer', 'Ground Truth']
-    res_schema = ['Match File', 'Row No', 'Vote', 'Ground Truth']
-    mv_res = {}
-    wawa_res = {}
-    ds_res = {}
-    
-    for rs in res_schema:
-        mv_res[rs] = []
-        wawa_res[rs] = []
-        ds_res[rs] = []
-    
-    for pair in pairsset:
-        mv_res['Match File'].append(pair[0])
-        mv_res['Row No'].append(pair[1])
-        wawa_res['Match File'].append(pair[0])
-        wawa_res['Row No'].append(pair[1])
-        ds_res['Match File'].append(pair[0])
-        ds_res['Row No'].append(pair[1])
-        
-        task_ind = pair[0] + ':' + str(pair[1])
-        mv_res['Vote'].append(mv_dct[task_ind])
-        wawa_res['Vote'].append(wawa_dct[task_ind])
-        ds_res['Vote'].append(ds_dct[task_ind])
-        
-        pair_df = df[(df['Match File'] == pair[0]) & (df['Row No'] == pair[1])]
-        pair_gt = pair_df['Ground Truth'].unique().tolist()[0]
-        mv_res['Ground Truth'].append(pair_gt)
-        wawa_res['Ground Truth'].append(pair_gt)
-        ds_res['Ground Truth'].append(pair_gt)
-        
-        #mv_res['Ditto Answer'].append(ditto_dct[pair[1]])
-        #wawa_res['Ditto Answer'].append(ditto_dct[pair[1]])
-        #ds_res['Ditto Answer'].append(ditto_dct[pair[1]])
-    
-    mv_df = pd.DataFrame(mv_res)
-    wawa_df = pd.DataFrame(wawa_res)
-    ds_df = pd.DataFrame(ds_res)
-    
-    mv_df.to_csv(outdir + '/MajorityVote_results' + '-temperature' + str(temp).replace('.', '_') + '.csv', index=False)
-    wawa_df.to_csv(outdir + '/Wawa_results' + '-temperature' + str(temp).replace('.', '_') + '.csv', index=False)
-    ds_df.to_csv(outdir + '/DawidSkene_results' + '-temperature' + str(temp).replace('.', '_') + '.csv', index=False)
-
-
-def perprompt_majorities(df, temp, outdir):
-    '''
-    Compute the majority response across iterations for the same prompt.
-
-    Parameters
-    ----------
-    fullfname : TYPE
-        DESCRIPTION.
-    temp : TYPE
-        DESCRIPTION.
-
-    Returns
-    -------
-    None.
-
-    '''
-    tmpdf = df[df['Sampling Param'] == temp]
-    out_schema = ['Match File', 'Row No', 'Prompt', 'Yes Votes', 'No Votes', 'Majority']
-    out_dct = {}
-    for o in out_schema:
-        out_dct[o] = []
-    
-    for prompt in tmpdf['Story Name'].unique().tolist():
-        promptdf = tmpdf[tmpdf['Story Name'] == prompt]
-        for match_file in promptdf['Match File'].unique().tolist():
-            for rowno in promptdf['Row No'].unique().tolist():
-                cand_df = promptdf[(promptdf['Match File'] == match_file) & (promptdf['Row No'] == rowno)]
-                vote_dct = cand_df['Story Answer'].value_counts().to_dict()
-                if 1 in vote_dct:
-                    yesvotes = vote_dct[1]
-                else:
-                    yesvotes = 0
-                
-                if 0 in vote_dct:
-                    novotes = vote_dct[0]
-                else:
-                    novotes = 0
-                othervotes = sum([vote_dct[k] for k in vote_dct if k != 0 and k != 1])
-                out_dct['Match File'].append(match_file)
-                out_dct['Row No'].append(rowno)
-                out_dct['Prompt'].append(prompt)
-                out_dct['Yes Votes'].append(yesvotes)
-                out_dct['No Votes'].append(novotes + othervotes)
-                if yesvotes > (novotes + othervotes):
-                    out_dct['Majority'].append(True)
-                else:
-                    out_dct['Majority'].append(False)
-    
-    out_df = pd.DataFrame(out_dct)
-    out_df.to_csv(outdir + '/per_promptresults_tmperature' + str(temp).replace('.', '_') + '.csv', index=False)
-
-
-def get_stats(method_names, temperatures, story_names, outdir):
-    '''
-    Generate a csv to compare the precision, recall, f1 of crowd methods, individual prompt responses, etc. to baselines
-
-    Parameters
-    ----------
-    method_names : TYPE
-        DESCRIPTION.
-    temps : TYPE
-        DESCRIPTION.
-    story_names : TYPE
-        DESCRIPTION.
-
-    Returns
-    -------
-    None.
-
-    '''
-
-    method2df = {}
-    story2df = {}
-    for mn in method_names:
-        for temp in temperatures:
-            strtemp = str(temp).replace('.', '_')
-            method2df[(mn, temp)] = pd.read_csv(f'{outdir}/{mn}_results-temperature{strtemp}.csv')
-
-    for temp in temperatures:
-        strtemp = str(temp).replace('.', '_')
-        story_df = pd.read_csv(f'{outdir}/per_promptresults_tmperature{strtemp}.csv')
-        for sn in story_names:
-            story2df[(sn, temp)] = story_df[story_df['Prompt'] == sn]
-    truth_df = method2df[(method_names[0], temperatures[0])][['Match File', 'Row No', 'Ground Truth']].copy()
-
-    out_dict = {'Dataset': [], 'Method': [], 'Temp': [], 'Crowd': [], 'F1': [], 'Precision': [], 'Recall': []}
-
-    for mn in method_names:
-        for temp in temperatures:
-            full_df = method2df[(mn, temp)]
-            full_df['Vote'] = (full_df['Vote'] == 1)
-
-            for dataset, df in full_df.groupby('Match File'):
-                our_tps = df[(df['Vote'] == df['Ground Truth']) & (df['Ground Truth'] == True)].shape[0]
-                our_tns = df[(df['Vote'] == df['Ground Truth']) & (df['Ground Truth'] == False)].shape[0]
-                our_fps = df[(df['Vote'] != df['Ground Truth']) & (df['Ground Truth'] == False)].shape[0]
-                our_fns = df[(df['Vote'] != df['Ground Truth']) & (df['Ground Truth'] == True)].shape[0]
-            
-                our_precision = our_tps / (our_tps + our_fps)
-                our_recall = our_tps / (our_tps + our_fns)
-                our_f1 = 2 * (our_precision * our_recall) / (our_precision + our_recall)
-
-                out_dict['Dataset'].append(dataset.split('/')[1].split('.')[0])
-                out_dict['Method'].append(mn)
-                out_dict['Temp'].append(temp)
-                out_dict['Crowd'].append(True)
-                out_dict['F1'].append(our_f1)
-                out_dict['Precision'].append(our_precision)
-                out_dict['Recall'].append(our_recall)
-            
-    for sn in story_names:
-        for temp in temperatures:
-            full_df = story2df[(sn, temp)]
-            full_df['Vote'] = full_df['Majority']
-            full_df = full_df.merge(truth_df, on=['Match File', 'Row No'])
-
-            for dataset, df in full_df.groupby('Match File'):
-                our_tps = df[(df['Vote'] == df['Ground Truth']) & (df['Ground Truth'] == True)].shape[0]
-                our_tns = df[(df['Vote'] == df['Ground Truth']) & (df['Ground Truth'] == False)].shape[0]
-                our_fps = df[(df['Vote'] != df['Ground Truth']) & (df['Ground Truth'] == False)].shape[0]
-                our_fns = df[(df['Vote'] != df['Ground Truth']) & (df['Ground Truth'] == True)].shape[0]
-            
-                our_precision = our_tps / (our_tps + our_fps)
-                our_recall = our_tps / (our_tps + our_fns)
-                our_f1 = 2 * (our_precision * our_recall) / (our_precision + our_recall)
-
-                out_dict['Dataset'].append(dataset.split('/')[1].split('.')[0])
-                out_dict['Method'].append(sn)
-                out_dict['Temp'].append(temp)
-                out_dict['Crowd'].append(False)
-                out_dict['F1'].append(our_f1)
-                out_dict['Precision'].append(our_precision)
-                out_dict['Recall'].append(our_recall)
-
-    pd.DataFrame(out_dict).to_csv(f'{outdir}/stats.csv', index=False)
 
 
 def query(args):
@@ -419,27 +206,62 @@ def query(args):
     uniform_shot_offset = None
     if args.uniform_shots:
         uniform_shot_offset = args.uniform_shot_offset
+    if args.cot:
+        if args.shots_cot:
+            print("--shots-cot is incompatible with --cot")
     for num_reps in range(1, args.reps + 1):
         print(f"Rep {num_reps}:")
         for d in args.datasets:
             print(f"Dataset {d}:")
-            maindf = pd.read_csv(f'er_results/{d}.csv')
+            maindf = pd.read_csv(f'{args.source}/{d}.csv')
             if args.shot_dataset is None:
                 traindf = pd.read_csv(f'er_train/{d}.csv')
             else:
                 traindf = pd.read_csv(f'er_train/{args.shot_dataset}.csv')
+            if args.cot or args.shots_cot:
+                traindf = traindf[~traindf['cot'].isna()]
             match_prefix = d
             match_outfolder = f'{d}results'
             ditto_dct = maindf['match'].to_dict()
             rep_row = ditto_dct.keys()
             for s in args.stories:
                 print(f"Story {s}")
-                storysuff(f'er_results/{d}.csv', s, args.temps, 'temperature', rep_row, match_prefix, num_reps=num_reps, shots=args.shots, shot_df=traindf, uniform_shot_offset=uniform_shot_offset, outdir=args.rawdir)
+                storysuff(f'{args.source}/{d}.csv', s, args.temps, 'temperature', rep_row, match_prefix, num_reps=num_reps, shots=args.shots, shot_df=traindf, uniform_shot_offset=uniform_shot_offset, outdir=args.rawdir, cot=args.cot, shot_fullrandom=args.shot_fullrandom)
 
+EXAMPLES = [
+    (
+        "- title: instant immersion spanish deluxe 2.0\n- manf/modelno: topics entertaiment\n- price: 49.99",
+        "- title: instant immers spanish dlux 2\n- manf/modelno: NULL\n- price: 36.11",
+    ),
+    (
+        "- title: adventure workshop 4th-6th grade 7th edition\n- manf/modelno: encore software\n- price: 19.99",
+        "- title: encore inc adventure workshop 4th-6th grade 8th edition\n- manf/modelno: NULL\n- price: 17.1",
+    ),
+    (
+        "- title: sharp printing calculator\n- manf/modelno: sharp el1192bl\n- price: 57.63",
+        "- title: new-sharp shr-el1192bl two-color printing calculator 12-digit lcd black red\n- manf/modelno: NULL\n-price: 56.0",
+    ),
+]
+
+def examples(args):
+    load_dotenv()
+    openai.api_key = os.getenv(f"OPENAI_API_KEY{args.key}")
+    story_tmp = TEMPLATES[args.story]
+    for idx, (left, right) in enumerate(EXAMPLES):
+        print(f"Example {idx+1}:")
+        print("---")
+        chat = build_chat(story_tmp, left, right, [])
+        response = raw_response(chat, 0.0, max_tokens=1000)
+        for entry in chat:
+            print(f"<{entry['role']}>\n{entry['content']}")
+            print()
+        print("<response>")
+        print(response)
+        print()
+        print()
 
 def combine(args):
     os.makedirs(args.outdir, exist_ok=True)
-    #regex = re.compile(r'(?P<dataset>[A-Za-z]+(-[A-Za-z]+)?)-(?P<story>[a-z]+)-(?P<row>[0-9]+)-rep(?P<rep>[0-9]+)-temperature(?P<temp>[0-2])_0-(?P<shot>[0-9])shot.csv')
     small_dfs = []
     big_dfs = []
     counter = 0
@@ -457,22 +279,13 @@ def combine(args):
             small_dfs = []
     print("Concatting...")
     df = pd.concat(big_dfs + small_dfs)
+    # Fix customer query
+    customer_0 = (df['Story Name'] == 'customer') & (df['Story Answer'] == 0)
+    customer_1 = (df['Story Name'] == 'customer') & (df['Story Answer'] == 1)
+    df.loc[customer_0, 'Story Answer'] = 1
+    df.loc[customer_1, 'Story Answer'] = 0
     print("Writing...")
     df.to_csv(f'{args.outdir}/full.csv', index=False)
-
-def analyze(args):
-    result_file = f"{args.outdir}/full.csv"
-    df = pd.read_csv(result_file)
-    df = df[~df['Sampling Param'].isna()]
-    df['Rep No'] = df['Rep No'].astype(float).astype(int)
-    df['Row No'] = df['Row No'].astype(float).astype(int)
-    if args.reps is not None:
-        df = df[df['Rep No'] <= args.reps]
-    for temp in args.temps:
-        print(f"Temp {temp}:")
-        crowd_gather(df, temp, args.outdir)
-        perprompt_majorities(df, temp, args.outdir)
-    get_stats(["MajorityVote", "Wawa", "DawidSkene"], args.temps, args.stories, args.outdir)
 
 def retry(args):
     load_dotenv()
@@ -510,38 +323,35 @@ def retry(args):
     
 
 if __name__=='__main__':
-    #this is a representative row, 
-    #in that the first is a true positive, next is false positive, next is true negative, next is false negative
-    # rep_row = [23, 25, 46, 0, 29, 31]
-    # rep_row = [2, 12, 30, 0, 1, 3, 46, 201, 302, 44, 136, 207]
-    # ditto_dct = {2 : True, 12 : True, 30 : True, 0 : False, 1 : False, 3 : False, 46 : True, 201 : True, 302 : True, 44 : False, 136 : False, 207 : False}
     parser = argparse.ArgumentParser()
     subparsers = parser.add_subparsers(required=True)
 
     parser_query = subparsers.add_parser('query')
+    parser_query.add_argument("--source", default='er_results', help="Directory of source datasets")
     parser_query.add_argument("--stories", nargs='+', default=STORIES, choices=list(TEMPLATES.keys()))
     parser_query.add_argument("--datasets", nargs='+', default=DATASETS, choices=ALL_DATASETS)
-    parser_query.add_argument("--reps", type=int, default=10)
-    parser_query.add_argument("--temps", type=float, nargs='+', default=[2.0])
-    parser_query.add_argument("--key", type=int, required=True)
+    parser_query.add_argument("--reps", type=int, default=1)
+    parser_query.add_argument("--temps", type=float, nargs='+', default=[0.0])
+    parser_query.add_argument("--key", type=int, required=True, help='OpenAI API key index')
     parser_query.add_argument("--shots", type=int, default=0)
     parser_query.add_argument("--shot-dataset", default=None, choices=ALL_DATASETS)
+    parser_query.add_argument("--shots-cot", action='store_true', help='Only use few-shot examples that have a CoT description associated (as a baseline for cot)')
+    parser_query.add_argument("--cot", action='store_true', help='Chain-of-thought prompting')
+    parser_query.add_argument("--shot-fullrandom", action='store_true', help='Fully random shots, different for each worker')
     parser_query.add_argument("--uniform-shots", action='store_true')
     parser_query.add_argument("--uniform-shot-offset", type=int, default=0)
     parser_query.add_argument("--rawdir", required=True)
     parser_query.set_defaults(func=query)
 
+    parser_query = subparsers.add_parser('examples')
+    parser_query.add_argument("--story", default='baseline', choices=list(TEMPLATES.keys()))
+    parser_query.add_argument("--key", type=int, required=True)
+    parser_query.set_defaults(func=examples)
+
     parser_combine = subparsers.add_parser('combine')
     parser_combine.add_argument("--rawdir", required=True)
     parser_combine.add_argument("--outdir", required=True)
     parser_combine.set_defaults(func=combine)
-
-    parser_analyze = subparsers.add_parser('analyze')
-    parser_analyze.add_argument("--reps", type=int, default=10)
-    parser_analyze.add_argument("--temps", type=float, nargs='+', default=[2.0])
-    parser_analyze.add_argument("--stories", nargs='+', default=STORIES, choices=list(TEMPLATES.keys()))
-    parser_analyze.add_argument("--outdir", required=True)
-    parser_analyze.set_defaults(func=analyze)
 
     parser_retry = subparsers.add_parser('retry')
     parser_retry.add_argument("--key", type=int, required=True)
