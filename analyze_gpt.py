@@ -36,12 +36,12 @@ def main(args):
     worker_f1s = worker_f1s.rename(columns={'worker': 'method'})
     crowd_f1s['crowd'] = True
     worker_f1s['crowd'] = False
+    baseline_f1s['crowd'] = False
     crowd_f1s['model'] = 'ChatGPT'
     worker_f1s['model'] = 'ChatGPT'
 
     f1s = pd.concat([baseline_f1s, worker_f1s, crowd_f1s])
     f1s.to_csv(exp_dir / 'full.csv', index=False)
-    
 
 
 def gather_experiments(experiment_dir, experiments, datasets):
@@ -121,7 +121,10 @@ def calculate_crowd_f1s(df, truth, crowds, methods, default_workers):
 def gather_baselines(baseline_dir, datasets):
     out = {'model': [], 'dataset': [], 'size': [], 'train_set': [], 'F1': []}
     for dataset in datasets:
-        df = pd.read_csv(baseline_dir / f'{dataset}.csv')
+        try:
+            df = pd.read_csv(baseline_dir / f'{dataset}.csv')
+        except FileNotFoundError:
+            continue
         for col in df.columns:
             if not col.startswith('pred_'):
                 continue
@@ -143,7 +146,8 @@ def gather_baselines(baseline_dir, datasets):
             out['size'].append(dataset_size)
             out['train_set'].append(train_set)
             out['F1'].append(f1)
-        return pd.DataFrame(out)
+
+    return pd.DataFrame(out)
 
 
 class EBCC:

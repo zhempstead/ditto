@@ -9,8 +9,8 @@ import time
 
 gpu_id = 0
 
-for d in datasets:
-    for size in sizes:
+for d in ["computers"]:
+    for size in ["medium"]:
         dataset = '_'.join(['wdc', d, size])
         for dk in [True]:
             for da in [True]:

@@ -13,9 +13,9 @@ class IntegrationPrompt:
         self.lang = 'english'
     
     def get_prompt(self, candidate1, candidate2, include_preamble=True):
-        full_st = self.c1sentence + candidate1 + ' ' + self.c2sentence + ' ' + candidate2 + ' ' + self.question
+        full_st = self.c1sentence + '\n' + candidate1 + '\n\n' + self.c2sentence + '\n' + candidate2 + '\n\n' + self.question
         if include_preamble:
-            full_st = self.preamble + ' ' + full_st
+            full_st = self.preamble + '\n\n' + full_st
         return full_st
 
     def get_chat(self, candidate1, candidate2, examples, followup):

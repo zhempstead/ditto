@@ -5,7 +5,7 @@
     "vocab": ["0", "1"],
     "trainset": "data/new_wdc/train.txt.small",
     "validset": "data/new_wdc/valid.txt.small",
-    "testset": "data/new_wdc/test_unseen.txt"
+    "testset": "data/new_wdc/test_{unseen}.txt"
   },
   {
     "name": "new_wdc_medium",
@@ -13,7 +13,7 @@
     "vocab": ["0", "1"],
     "trainset": "data/new_wdc/train.txt.medium",
     "validset": "data/new_wdc/valid.txt.medium",
-    "testset": "data/new_wdc/test_unseen.txt"
+    "testset": "data/new_wdc/test_{unseen}.txt"
   },
   {
     "name": "new_wdc_large",
@@ -21,7 +21,7 @@
     "vocab": ["0", "1"],
     "trainset": "data/new_wdc/train.txt.large",
     "validset": "data/new_wdc/valid.txt.large",
-    "testset": "data/new_wdc/test_unseen.txt"
+    "testset": "data/new_wdc/test_{unseen}.txt"
   },
   {
     "name": "wdc_all_small",

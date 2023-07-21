@@ -3,97 +3,209 @@ import argparse
 from pathlib import Path
 
 from crowdkit.aggregation import MajorityVote, Wawa, DawidSkene
+import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
+import pingouin
 from scipy import stats
 from sklearn import metrics
 
+plt.style.use('tableau-colorblind10')
+plt.rcParams['font.family'] = 'serif'
+plt.rcParams['font.serif'] = ['Times New Roman'] + plt.rcParams['font.serif']
+plt.rcParams['font.size'] = 14
+plt.rcParams["font.weight"] = "bold"
+plt.rcParams["axes.labelweight"] = "bold"
+plt.rcParams["axes.titleweight"] = "bold"
+plt.rcParams['xtick.major.width'] = 1.5
+plt.rcParams['ytick.major.width'] = 1.5
+
+
+
 CROWD_METHODS = {'DawidSkene': DawidSkene(n_iter=10), 'MajorityVote': MajorityVote(), 'Wawa': Wawa()}
 
-def story_pivot(df):
-    return df.pivot(columns='Story Name', index=['task', 'Match File', 'Row No', 'Ground Truth'], values='Story Answer').reset_index()
+def worker_pivot(df):
+    return df.pivot(columns='worker', index=['task', 'Match File', 'Row No', 'Ground Truth'], values='label').reset_index()
 
 def independence_test(df, col1, col2):
     res = stats.chi2_contingency(pd.crosstab(df[col1], df[col2]))
     return res[1]
 
 def print_conditional_independences(df):
-    crowd_members = df['Story Name'].unique()
-    df = story_pivot(df)
+    crowd_members = df['worker'].unique()
+    df = worker_pivot(df)
     dfs = {True: df[df['Ground Truth'] == 1], False: df[df['Ground Truth'] == 0]}
+    test_stats = []
     for i in range(len(crowd_members)):
         m1 = crowd_members[i]
         for j in range(i+1, len(crowd_members)):
+            
             m2 = crowd_members[j]
-            for truth in True, False:
-                df_test = dfs[truth]
-                print(f"{m1} {m2} {truth}")
-                print(independence_test(df_test, m1, m2))
+            test_stat = 1
+            test_stat = min(independence_test(dfs[True], m1, m2), independence_test(dfs[False], m1, m2))
+            test_stats.append((test_stat, m1, m2))
+    for stat in sorted(test_stats):
+        print(stat)
 
-def print_correlations(df):
-    df = story_pivot(df)
-    dfs = {True: df[df['Ground Truth'] == 1], False: df[df['Ground Truth'] == 0]}
-    print("True:")
-    print(dfs[True].corr())
-    print("False:")
-    print(dfs[False].corr())
+def partial_correlations(df):
+    df = worker_pivot(df).drop(columns=['Row No'])
+    partial = partial_corr(df, 'Ground Truth')[0]
+    fig = plot_correlations(partial)
+    return fig
+    
 
-def print_overall_f1s(df_pivot, crowd_members):
+def partial_corr(df, covariate_col):
+    df_pivot = worker_pivot(df).drop(columns=['Row No'])
+    df_dropped = df_pivot.drop(columns=[covariate_col])
+    corr_matrix = df_dropped.corr() # To bootstrap a DataFrame with the right rows/columns
+    pval_matrix = corr_matrix.copy()
+    cols = corr_matrix.columns
+    for col1 in cols:
+        for col2 in cols:
+            if col1 == col2:
+                pval_matrix.loc[col1, col2] = 0
+                continue
+            partial = df_pivot.partial_corr(x=col1, y=col2, covar=covariate_col)
+            corr_matrix.loc[col1, col2] = partial.loc['pearson', 'r']
+            pval_matrix.loc[col1, col2] = partial.loc['pearson', 'p-val']
+    return (corr_matrix, pval_matrix)
+
+def plot_correlations(df):
+    data = df.to_numpy()
+    fig, ax = plt.subplots(layout='constrained')
+
+    size = len(df.columns)
+
+    im = ax.imshow(data, cmap='coolwarm', vmin=-1, vmax=1)
+
+    cbar = ax.figure.colorbar(im, ax=ax)
+    cbar.ax.set_ylabel("Partial correlations")
+
+    ax.set_xticks(np.arange(size), labels=df.columns)
+    ax.set_yticks(np.arange(size), labels=df.columns)
+    ax.tick_params(top=True, bottom=False, labeltop=True, labelbottom=False)
+
+    plt.setp(ax.get_xticklabels(), rotation=-30, ha="right", rotation_mode="anchor")
+
+    ax.spines[:].set_visible(False)
+    ax.set_xticks(np.arange(size + 1) - 0.5, minor=True)
+    ax.set_yticks(np.arange(size + 1) - 0.5, minor=True)
+    ax.grid(which="minor", color="w", linestyle='-', linewidth=3)
+    ax.tick_params(which="minor", bottom=False, left=False)
+
+    return fig
+
+def plot_lines(df, dataset):
+    df['# Removed'] = range(len(df))
+
+    fig, ax = plt.subplots(layout='constrained')
+
+    for col in df.columns[:-1]:
+        ax.plot('# Removed', col, data=df, marker='o')
+    ax.legend(loc='lower left', fancybox=True, shadow=True, ncol=2)
+    ax.set_ylabel('F1')
+    ax.set_xlabel("# of workers removed")
+    ax.set_title(dataset)
+    return fig
+
+def iterative_crowd(df, workers, methods):
+    '''
+    methods should be a Dict of str to a function that takes in a df and returns a series of predictions indexed by task
+    '''
+    df = df.copy()
+    df_pivot = worker_pivot(df)
+    crowd = ordered_crowd(df_pivot, workers)
+
+    out = {method: [] for method in methods.keys()}
+    
+    for idx, worker in enumerate(crowd):
+        for method, func in methods.items():
+            predictions = func(df, worker)
+            predictions.name = method
+            predictions = df_pivot[['task', 'Ground Truth']].merge(predictions, on='task')
+            accuracy = sum(predictions['Ground Truth'] == predictions[method]) / len(predictions)
+            f1 = metrics.f1_score(predictions['Ground Truth'], predictions[method])
+            out[method].append(f1 * 100)
+            #out[method].append(accuracy * 100)
+        df = df[df['worker'] != worker]
+        df_pivot = worker_pivot(df)
+    return pd.DataFrame(out)
+
+def method_majority_vote(df, curr_worker):
+    return MajorityVote().fit_predict(df)
+
+def method_dawid_skene(df, curr_worker):
+    return DawidSkene(n_iter=10).fit_predict(df)
+
+def method_best_remaining(df, curr_worker):
+    return df.loc[df['worker'] == curr_worker, ['task', 'label']].set_index('task')['label']
+
+def method_optimal_f1(df, curr_worker):
+    workers = list(df['worker'].unique())
+    df_pivot = worker_pivot(df)
+    grouped = df_pivot.groupby(workers).mean().reset_index()
+    levels = grouped.loc[grouped['Ground Truth'] <= 0.5, 'Ground Truth'].unique()
+    levels = sorted(levels, reverse=True) + [0.0]
+    best_f1 = -1.0
+    best_output = None
+    for level in levels:
+        grouped['agg_label'] = (grouped['Ground Truth'] > level)
+        output = df_pivot.merge(grouped[workers + ['agg_label']], on=workers).set_index('task')['agg_label']
+        predictions = df_pivot[['task', 'Ground Truth']].merge(output, on='task')
+        f1 = metrics.f1_score(predictions['Ground Truth'], predictions['agg_label'])
+        if f1 > best_f1:
+            best_f1 = f1
+            best_output = output
+    return best_output
+    
+def method_optimal_accuracy(df, curr_worker):
+    workers = list(df['worker'].unique())
+    df_pivot = worker_pivot(df)
+    grouped = df_pivot.groupby(workers).mean().reset_index()
+    grouped['agg_label'] = 0
+    grouped.loc[grouped['Ground Truth'] > 0.5, 'agg_label'] = 1
+    return df_pivot.merge(grouped[workers + ['agg_label']], on=workers).set_index('task')['agg_label']
+
+def ordered_crowd(df_pivot, workers):
     f1s = []
-    for col in crowd_members:
+    for col in workers:
         f1s.append((metrics.f1_score(df_pivot['Ground Truth'], df_pivot[col]), col))
-    for metric, col in sorted(f1s, reverse=True):
-        print(col, metric)
-    return [(col, metric) for metric, col in sorted(f1s, reverse=True)]
+    return [col for _, col in sorted(f1s, reverse=True)]
 
-
-def print_dataset_f1s(df_pivot, crowd_members):
-    for dataset in df_pivot['Match File'].unique():
-        print()
-        print(dataset)
-        print('---')
-        print_overall_f1s(df_pivot[df_pivot['Match File'] == dataset], crowd_members)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument("results_root")
-    parser.add_argument("--experiment", default="crowd-temp0-shots2-results")
+    parser.add_argument("experiment_dir")
     parser.add_argument("--temp", default='0.0')
+    parser.add_argument("--datasets", nargs='+', default=['wdc_unseen', 'cameras', 'computers', 'shoes', 'watches'])
     args = parser.parse_args()
-    exp_dir = Path(args.results_root) / 'entity_resolution' / args.experiment
+    exp_dir = Path(args.experiment_dir)
     temp_str = args.temp.replace('.', '_')
 
     df = pd.read_csv(exp_dir / 'full.csv')
+    match_files = [f'er_results/{dataset}.csv' for dataset in args.datasets]
+    df = df[df['Match File'].isin(match_files)]
     df['task'] = df['Match File'] + ': ' + df['Row No'].astype(str)
-    prompts = df['Story Name'].unique()
-    df.loc[df['Story Answer'] == -1, 'Story Answer'] = 0
+    df = df.rename(columns={"Story Name": "worker", "Story Answer": "label"})
+    workers = df['worker'].unique()
+    df.loc[df['label'] == -1, 'label'] = 0
     # Boolean to int
     df['Ground Truth'] = df['Ground Truth'] * 1
+    corrs = partial_corr(df, 'Ground Truth')[0]
+    fig = plot_correlations(corrs)
+
+    fig.savefig(f'corrs/{exp_dir.name}.pdf')
+    corrs.to_csv(f'corrs/{exp_dir.name}.csv')
+
     print_conditional_independences(df)
-    print_correlations(df)
-
-    df_pivot = story_pivot(df)
-    #for method in CROWD_METHODS.keys():
-    #    crowd_df = pd.read_csv(exp_dir / f'{method}_results-temperature{temp_str}.csv')
-    #    crowd_df = crowd_df.rename(columns={'Vote': method})
-    #    crowd_df = crowd_df[['Match File', 'Row No', method]]
-    #    df_pivot = df_pivot.merge(crowd_df, on=['Match File', 'Row No'])
-    #print_overall_f1s(df_pivot, ['baseline', 'layperson'])
-    #print_dataset_f1s(df_pivot, ['baseline', 'layperson'])
-    f1_ordered = print_overall_f1s(df_pivot, prompts)
-    dfc = df.copy()
-    dfc = dfc.rename(columns={"Story Name": "worker", "Story Answer": "label"})
-    #f1_ordered.reverse()
-    for col, f1 in f1_ordered:
-        print()
-        print(f"{col}: {f1}")
-        print("---")
-        for method, mfunc in CROWD_METHODS.items():
-            mseries = mfunc.fit_predict(dfc)
-            joined = df_pivot.merge(mseries, on='task')
-            f1 = metrics.f1_score(joined['Ground Truth'], joined['agg_label'])
-            print(f"{method}: {f1}")
-        dfc = dfc[dfc['worker'] != col]
-            
-
-    #print_dataset_f1s(df_pivot, prompts)
-    import pdb; pdb.set_trace()
+    
+    for dataset in df['Match File'].unique():
+        dataset_name = dataset.split('/')[-1].split('.')[0]
+        results = iterative_crowd(df[df['Match File'] == dataset], workers, methods={
+            'MajorityVote': method_majority_vote,
+            'DawidSkene': method_dawid_skene,
+            'Best Remaining': method_best_remaining,
+            'Optimal Crowd Method': method_optimal_accuracy,
+        })
+        fig = plot_lines(results, dataset_name)
+        fig.savefig(f'corrs/{exp_dir.name}-{dataset_name}.pdf')

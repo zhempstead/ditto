@@ -1,0 +1,96 @@
+experiment_dir: '../gpt_di/entity_resolution'
+experiments:
+  fixed_shots/0: True
+  fixed_shots/1: True
+  fixed_shots/2: True
+  fixed_shots/3: True
+  fixed_shots/4: True
+  fixed_shots/5: True
+  fixed_shots/6: True
+  fixed_shots/7: True
+  fixed_shots/8: True
+  fixed_shots/9: True
+  temp0-cot0: False
+  temp0-cot2: False
+  temp0-shots0: True
+  temp0-shots2c: True
+  temp0-shots2: True
+  temp2-shots0: True
+  temp2-shots2: True
+  valid-temp0-shots2: True
+datasets:
+  cameras: True
+  computers: True
+  shoes: True
+  watches: True
+  wdc_unseen: True
+  wdc_half: False
+  wdc_seen: False
+  valid_cameras: True
+  valid_computesr: True
+  valid_shoes: True
+  valid_watches: True
+  valid_wdc: True
+default_workers:
+- layperson
+- veryplain
+- baseline
+- security
+- plain
+- journalist
+- customer
+- detective
+default_methods:
+- MajorityVote
+- DawidSkene
+- GLAD
+- EBCC
+- BWA
+- GoldStandard
+crowds:
+  multi_shot:
+    temp0-shots0: []
+    temp0-shots2: []
+  bottom4:
+    temp0-shots2:
+    - plain
+    - journalist
+    - customer
+    - detective
+  bottom3:
+    temp0-shots2:
+    - journalist
+    - customer
+    - detective
+  top1_bottom2:
+    temp0-shots2:
+    - layperson
+    - customer
+    - detective
+  cot_crowd:
+    temp0-shots0: [baseline]
+    temp0-shots2: [baseline]
+    temp0-cot0: [baseline]
+    temp0-cot2: [baseline]
+  fixed_baseline:
+    fixed_shots/0: [baseline]
+    fixed_shots/1: [baseline]
+    fixed_shots/2: [baseline]
+    fixed_shots/3: [baseline]
+    fixed_shots/4: [baseline]
+    fixed_shots/5: [baseline]
+    fixed_shots/6: [baseline]
+    fixed_shots/7: [baseline]
+    fixed_shots/8: [baseline]
+    fixed_shots/9: [baseline]
+  fixed_full: 
+    fixed_shots/0: []
+    fixed_shots/1: []
+    fixed_shots/2: []
+    fixed_shots/3: []
+    fixed_shots/4: []
+    fixed_shots/5: []
+    fixed_shots/6: []
+    fixed_shots/7: []
+    fixed_shots/8: []
+    fixed_shots/9: []

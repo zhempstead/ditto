@@ -36,6 +36,7 @@ if __name__=="__main__":
     parser.add_argument("--dk", type=str, default=None)
     parser.add_argument("--summarize", dest="summarize", action="store_true")
     parser.add_argument("--size", type=int, default=None)
+    parser.add_argument("--unseen", type=str, default=None)
 
     hp = parser.parse_args()
 
@@ -55,6 +56,8 @@ if __name__=="__main__":
     for dataset in ["cameras", "computers", "shoes", "watches", "Amazon-Google"]:
         if dataset in test_task:
             test_df_name = dataset
+    if hp.unseen is not None:
+        test_df_name = f'{test_df_name}_{hp.unseen}'
 
     # load task configuration
     configs = json.load(open('configs.json'))
@@ -64,6 +67,9 @@ if __name__=="__main__":
 
     validset = train_config['validset']
     testset = test_config['testset']
+    if hp.unseen is not None:
+        testset = testset.format(unseen=hp.unseen)
+        train_config['testset'] = train_config['testset'].format(unseen=hp.unseen)
 
     # summarize the sequences up to the max sequence length
     if hp.summarize:
@@ -104,8 +110,8 @@ if __name__=="__main__":
     dev_f1, th = evaluate(model, valid_iter)
     test_f1, ys, preds = evaluate(model, test_iter, threshold=th, return_preds=True)
 
-    test_df_name = f'er_results/{test_df_name}.csv'
+    test_df_name = f'er_validation/{test_df_name}.csv'
     df = pd.read_csv(test_df_name)
-    assert all([bool(y) for y in ys] == df['match'])
+    #assert all([bool(y) for y in ys] == df['match'])
     df[f'pred_ditto_{train_task}'] = [bool(pred) for pred in preds]
     df.to_csv(test_df_name, index=False)

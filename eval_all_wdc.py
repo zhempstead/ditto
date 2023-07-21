@@ -9,10 +9,10 @@ import time
 
 gpu_id = 0
 
-for d in datasets:
-    for size in sizes:
+for d in ["computers"]:
+    for size in ["small"]:
         test_task = '_'.join(['wdc', d, size])
-        train_task = '_'.join(['wdc', 'cameras', size])
+        train_task = '_'.join(['wdc', d, size])
         for dk in [True]:
             for da in [True]:
                 #for run_id in range(5):

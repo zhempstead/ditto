@@ -93,10 +93,3 @@ if __name__=="__main__":
           valid_dataset,
           test_dataset,
           run_tag, hp)
-
-    datadir = Path(testset).parent
-    test_csv = datadir / 'test.csv'
-    df = pd.read_csv(test_csv)
-    assert all([bool(y) for y in ys] == df['match'])
-    df['ditto_pred'] = [bool(pred) for pred in preds]
-    df.to_csv(datadir / 'test_pred.csv', index=False)

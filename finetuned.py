@@ -15,19 +15,29 @@ FINETUNED_MODELS = {
     #('all', 'large', 'ada'): "ada:ft-university-of-chicago-2023-04-11-05-48-56",
     ('cameras', 'small', 'ada'): "ada:ft-university-of-chicago-2023-04-07-21-15-23",
     ('cameras', 'small', 'curie'): "curie:ft-university-of-chicago-2023-04-07-21-17-27",
+    ('cameras', 'medium', 'ada'): "ada:ft-university-of-chicago-2023-07-07-20-25-30",
     ('cameras', 'large', 'ada'): "ada:ft-university-of-chicago-2023-04-10-22-46-30",
     ('cameras', 'large', 'curie'): "curie:ft-university-of-chicago-2023-04-10-22-46-10",
+    ('cameras', 'xlarge', 'ada'): "ada:ft-university-of-chicago-2023-07-07-02-05-45",
     ('computers', 'small', 'ada'): "ada:ft-university-of-chicago-2023-04-26-23-17-07",
+    ('computers', 'medium', 'ada'): "ada:ft-university-of-chicago-2023-07-07-23-52-50",
     ('computers', 'large', 'ada'): "ada:ft-university-of-chicago-2023-04-26-23-41-37",
+    ('computers', 'xlarge', 'ada'): "ada:ft-university-of-chicago-2023-07-07-03-05-13",
     ('shoes', 'small', 'ada'): "ada:ft-university-of-chicago-2023-04-10-23-10-45",
     ('shoes', 'small', 'curie'): "curie:ft-university-of-chicago-2023-04-10-23-14-33",
+    ('shoes', 'medium', 'ada'): "ada:ft-university-of-chicago-2023-07-08-01-25-43",
     ('shoes', 'large', 'ada'): "ada:ft-university-of-chicago-2023-04-07-22-21-08",
     ('shoes', 'large', 'curie'): "curie:ft-university-of-chicago-2023-04-10-22-03-04",
     ('shoes', 'xlarge', 'ada'): "ada:ft-university-of-chicago-2023-04-10-22-10-02",
     ('watches', 'small', 'ada'): "ada:ft-university-of-chicago-2023-04-27-00-04-59",
+    ('watches', 'medium', 'ada'): "ada:ft-university-of-chicago-2023-07-08-02-22-58",
     ('watches', 'large', 'ada'): "ada:ft-university-of-chicago-2023-04-27-04-49-15",
+    ('watches', 'xlarge', 'ada'): "ada:ft-university-of-chicago-2023-07-07-05-44-49",
     ('Amazon-Google', None, 'ada'): "ada:ft-university-of-chicago-2023-04-11-17-00-45",
     ('Amazon-Google', None, 'curie'): "curie:ft-university-of-chicago-2023-04-11-16-54-37",
+    ('wdc', 'small', 'ada'): "ada:ft-university-of-chicago-2023-06-26-23-48-59",
+    ('wdc', 'medium', 'ada'): "ada:ft-university-of-chicago-2023-07-08-04-19-28",
+    ('wdc', 'large', 'ada'): "ada:ft-university-of-chicago-2023-06-26-23-29-22",
 }
 
 def add_results(df, colname, model):
@@ -77,6 +87,8 @@ if __name__ == '__main__':
     for (dataset, data_size, model) in FINETUNED_MODELS.keys():
         if model != 'ada':
             continue
+        if dataset != 'new_wdc':
+            continue
         if data_size == 'xlarge':
             continue
         print(dataset, data_size, model)
@@ -88,11 +100,32 @@ if __name__ == '__main__':
         df = add_results(df, colname, FINETUNED_MODELS[(dataset, data_size, model)])
         df.to_csv(f'er_results/{dataset}.csv', index=False)
     '''
+    '''
     for dataset in ['computers', 'shoes', 'watches']:
-        for size in ['small', 'large']:
+        for size in ['xlarge']:
             print(dataset, size)
             model = FINETUNED_MODELS[('cameras', size, 'ada')]
             colname = f'pred_finetune_cameras_ada_{size}'
             df = pd.read_csv(f'er_results/{dataset}.csv')
             df = add_results(df, colname, model)
             df.to_csv(f'er_results/{dataset}.csv', index=False)
+    '''
+    for dataset in ['cameras', 'computers', 'shoes', 'watches', 'wdc']:
+        for size in ['small', 'medium', 'large', 'xlarge']:
+            print(dataset, size)
+            model = FINETUNED_MODELS[(dataset, size, 'ada')]
+            colname = f'pred_finetune_ada_{size}'
+            df = pd.read_csv(f'er_validation/{dataset}.csv')
+            df = add_results(df, colname, model)
+            df.to_csv(f'er_validation/{dataset}.csv', index=False)
+    '''
+    for dataset in ['wdc_unseen', 'wdc_seen', 'wdc_half']:
+        for size in ['medium']:
+            print(dataset, size)
+            model = FINETUNED_MODELS[('new_wdc', size, 'ada')]
+            colname = f'pred_finetune_ada_{size}'
+            df = pd.read_csv(f'er_results/{dataset}.csv')
+            df = add_results(df, colname, model)
+            df.to_csv(f'er_results/{dataset}.csv', index=False)
+    '''
+    
